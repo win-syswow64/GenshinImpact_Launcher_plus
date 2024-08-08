@@ -100,7 +100,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         public ICommand OpenQQGroupUrlCommand { get; set; }
         private void OpenQQGroupUrl()
         {
-            FileHelper.OpenUrl("http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=oO2E38eDOU2d07l7yLNtsA_z_0pPRx3X&authKey=bDkkNCBUjepDiw6shol52PLokV%2FOb2dc6n87ley58iLK3JVnxEmw2xjAHNpgrbxy&noverify=0&group_code=981816177");
+            FileHelper.OpenUrl("https://qm.qq.com/q/UZWuLb38om");
         }
 
         public ICommand ExitProgramCommand { get; set; }
