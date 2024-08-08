@@ -68,6 +68,7 @@ namespace GenShin_Launcher_Plus.Service
                     {
                         break;
                     }
+                    await Task.Delay(1000);
                 }
                 if (App.Current.PkgUpdataModel.PkgVersion == "" || App.Current.PkgUpdataModel.PkgVersion == null || App.Current.PkgUpdataModel.PkgVersion == string.Empty)
                 {
