@@ -8,7 +8,6 @@
         public string DownloadUrl { get; set; }
         public string GlobalDownloadUrl { get; set; }
         public string PkgVersion { get; set; }
-        public string BgUrl { get; set; }
         public bool RequisiteUpdate { get; set; }
 
     }
