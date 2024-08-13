@@ -33,4 +33,4 @@
 ## 贡献者
 
 [![贡献者](https://contrib.rocks/image?repo=win-syswow64/GenshinImpact_Launcher_plus)](https://github.com/win-syswow64/GenshinImpact_Launcher_plus/graphs/contributors)
-![Alt](https://repobeats.axiom.co/api/embed/26e79889b3756142f3145cd72ae19830e6b4c06a.svg "Repobeats analytics image")
+![Alt](https://repobeats.axiom.co/api/embed/f7be9bafadc0a5e36dbe3becacf11707c528765e.svg "Repobeats analytics image")
