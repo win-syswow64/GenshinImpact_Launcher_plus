@@ -56,6 +56,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             SetMainBackgroundCommand = new RelayCommand(SetMainBackground);
             SwitchLanguagePageCommand = new RelayCommand(SwitchLanguagePage);
             OpenPkgDownloadUrlCommand = new RelayCommand(OpenPkgDownloadUrl);
+            OpenPrePkgDownloadUrlCommand = new RelayCommand(OpenPrePkgDownloadUrl);
             OpenApplicationFolderCommand = new RelayCommand(OpenApplicationFolder);
             RecoverDefaultSizeToMainCommand = new RelayCommand(RecoverDefaultSizeToMain);
 
@@ -493,7 +494,27 @@ namespace GenShin_Launcher_Plus.ViewModels
         public ICommand OpenPkgDownloadUrlCommand { get; set; }
         private void OpenPkgDownloadUrl()
         {
-            FileHelper.OpenUrl("http://pan.115832958.xyz:25212/s/zXc3");
+            if (new ConvertService().GetCurrentSchemeName() == "CnFile")
+            {
+                FileHelper.OpenUrl("https://download.115832958.xyz/?game=genshinimpact&ver=globalfile");
+            }
+            else
+            {
+                FileHelper.OpenUrl("https://download.115832958.xyz/?game=genshinimpact&ver=cnfile");
+            }
+        }
+
+        public ICommand OpenPrePkgDownloadUrlCommand { get; set; }
+        private void OpenPrePkgDownloadUrl()
+        {
+            if (new ConvertService().GetCurrentSchemeName() == "CnFile")
+            {
+                FileHelper.OpenUrl("https://download.115832958.xyz/?game=genshinimpact&ver=globalfile&pre=true");
+            }
+            else
+            {
+                FileHelper.OpenUrl("https://download.115832958.xyz/?game=genshinimpact&ver=cnfile&pre=true");
+            }
         }
 
         //设置页面手动检查更新命令

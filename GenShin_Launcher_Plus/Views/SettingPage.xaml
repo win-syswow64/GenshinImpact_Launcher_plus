@@ -388,7 +388,7 @@
                         <Button
                             Grid.Row="2" 
                             FontSize="12"
-                            Width="90"
+                            Width="72"
                             Margin="0,0,75,0" 
                             FontWeight="Normal"
                             FontFamily="Microsoft YaHei UI" 
@@ -398,6 +398,20 @@
                             IsEnabled="{Binding PageUiStatus}"
                             Style="{StaticResource MahApps.Styles.Button.Square}"
                             Command="{Binding OpenPkgDownloadUrlCommand}"/>
+                        
+                        <Button
+                            Grid.Row="2" 
+                            FontSize="12"
+                            Width="72"
+                            Margin="0,0,155,0" 
+                            FontWeight="Normal"
+                            FontFamily="Microsoft YaHei UI" 
+                            Content="{Binding languages.PrePkgFileBtn}"
+                            HorizontalAlignment="Right" 
+                            VerticalAlignment="bottom"
+                            IsEnabled="{Binding PageUiStatus}"
+                            Style="{StaticResource MahApps.Styles.Button.Square}"
+                            Command="{Binding OpenPrePkgDownloadUrlCommand}"/>
 
                         <Label  
                             Grid.Row="0" 

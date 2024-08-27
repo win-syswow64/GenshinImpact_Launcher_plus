@@ -119,6 +119,7 @@
         public string CloseGameWaring { get; set; }
         public string ConvertError { get; set; }
         public string GetPkgFileBtn { get; set; }
+        public string PrePkgFileBtn { get; set; }
         //UpdatePage
         public string DownPageTips { get; set; }
         public string UpdateSkipBtn { get; set; }
