@@ -108,7 +108,7 @@ namespace GenShin_Launcher_Plus.Service
                     }
                     string bgurl = App.Current.BackgroundModel.BackgroundUrl;
                     var client = new HttpClient(new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
-                    if (bgurl != null & bgurl != "null")
+                    if (bgurl != null & bgurl != "null" && bgurl != string.Empty)
                     {
                         try
                         {
@@ -129,12 +129,6 @@ namespace GenShin_Launcher_Plus.Service
                             vm.Background.Stretch = Stretch.UniformToFill;
                             Console.WriteLine($"Request error: {e.Message}");
                         }
-                    }
-                    else
-                    {
-                        MessageBox.Show("获取背景URL失败! ");
-                        vm.Background.ImageSource = new BitmapImage(uri);
-                        vm.Background.Stretch = Stretch.UniformToFill;
                     }
                     App.Current.IsLoadingBackground = false;
                     return;
