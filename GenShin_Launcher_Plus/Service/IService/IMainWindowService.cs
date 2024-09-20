@@ -1,4 +1,5 @@
 ﻿using GenShin_Launcher_Plus.ViewModels;
+using System.Threading.Tasks;
 
 namespace GenShin_Launcher_Plus.Service.IService
 {
@@ -17,5 +18,10 @@ namespace GenShin_Launcher_Plus.Service.IService
         /// <param name="vm">MainWindowViewModel的实例</param>
         /// <returns></returns>
         void MainBackgroundLoad(MainWindowViewModel vm);
+
+        /// <summary>
+        /// 异步实现Main中的通知
+        /// </summary>
+        Task CheckNotice();
     }
 }

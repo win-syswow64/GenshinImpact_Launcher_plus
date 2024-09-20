@@ -11,6 +11,7 @@ using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service.IService;
 using GenShin_Launcher_Plus.Service;
 using GenShin_Launcher_Plus.Helper;
+using System.Threading.Tasks;
 using System.Windows.Data;
 
 namespace GenShin_Launcher_Plus.ViewModels
@@ -33,6 +34,8 @@ namespace GenShin_Launcher_Plus.ViewModels
 
             Title = $"{languages.MainTitle} {Application.ResourceAssembly.GetName().Version}";
             App.Current.DataModel.EXEname(Path.GetFileName(Environment.ProcessPath));
+
+            SetNotice();
            
         }
 
@@ -77,6 +80,20 @@ namespace GenShin_Launcher_Plus.ViewModels
                     MessageDialogStyle.Affirmative,
                     new MetroDialogSettings()
                     { AffirmativeButtonText = languages.Determine });
+            }
+        }
+
+        private async Task SetNotice()
+        {
+            await MainService.CheckNotice();
+            if (App.Current.NoticeObject.Code == 200)
+            {
+                await dialogCoordinator.ShowMessageAsync(
+                   this, languages.TipsStr,
+                   App.Current.NoticeObject.NoticeMsg,
+                   MessageDialogStyle.Affirmative,
+                   new MetroDialogSettings()
+                   { AffirmativeButtonText = languages.Determine });
             }
         }
 

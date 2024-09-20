@@ -21,4 +21,9 @@
     {
         public string BackgroundUrl { get; set; }
     }
+    public class NoticeModel
+    {
+        public int Code { get; set; }
+        public string NoticeMsg { get; set; }
+    }
 }

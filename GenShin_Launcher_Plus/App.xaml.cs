@@ -91,6 +91,7 @@ namespace GenShin_Launcher_Plus
         public PkgUpdataModel? PkgUpdataModel { get; set; }
 
         public BackgroundModel? BackgroundModel { get; set; }
+        public NoticeModel? NoticeObject { get; set; }
 
         public MainWindow ThisMainWindow { get; set; }
 

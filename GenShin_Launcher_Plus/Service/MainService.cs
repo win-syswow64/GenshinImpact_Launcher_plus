@@ -4,11 +4,13 @@ using System.Net.Http;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Threading.Tasks;
 using System.Windows.Media.Media3D;
 using GenShin_Launcher_Plus.Core;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service.IService;
 using GenShin_Launcher_Plus.ViewModels;
+using MahApps.Metro.Controls.Dialogs;
 using Newtonsoft.Json;
 
 namespace GenShin_Launcher_Plus.Service
@@ -20,6 +22,15 @@ namespace GenShin_Launcher_Plus.Service
         {
             CheckConfig(main);
             MainBackgroundLoad(vm);
+        }
+
+        /// <summary>
+        /// 异步实现Main中的通知
+        /// </summary>
+        public async Task CheckNotice()
+        {
+            string json = await HtmlHelper.GetInfoFromHtmlAsync("Notice");
+            App.Current.NoticeObject = JsonConvert.DeserializeObject<NoticeModel>(json) ?? new();
         }
 
         /// <summary>
