@@ -84,7 +84,7 @@ namespace GenShin_Launcher_Plus.Service
                 {
                     ProcessStartInfo info = new()
                     {
-                        FileName = "https://download.115832958.xyz/?game=genshinimpact&ver=cnfile",
+                        FileName = "https://download.ganyu.us.kg/now/GenshinImpact/CnFile.pkg",
                         UseShellExecute = true,
                     };
                     Process.Start(info);
@@ -93,7 +93,7 @@ namespace GenShin_Launcher_Plus.Service
                 {
                     ProcessStartInfo info = new()
                     {
-                        FileName = "https://download.115832958.xyz/?game=genshinimpact&ver=globalfile",
+                        FileName = "https://download.ganyu.us.kg/now/GenshinImpact/GlobalFile.pkg",
                         UseShellExecute = true,
                     };
                     Process.Start(info);
