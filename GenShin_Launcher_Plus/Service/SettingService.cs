@@ -36,9 +36,9 @@ namespace GenShin_Launcher_Plus.Service
             vm.StateIndicator = App.Current.Language.StateIndicatorDefault;
             vm.IsMihoyo = App.Current.DataModel.Cps switch
             {
-                "pcadbdpz" => 0,
+                "mihoyo" => 0,
                 "bilibili" => 1,
-                "mihoyo" => 2,
+                "hoyoverse" => 2,
                 _ => 3,
             };
         }

@@ -39,9 +39,9 @@ namespace GenShin_Launcher_Plus.Service
             {
                 string gameClientType = App.Current.DataModel.Cps switch
                 {
-                    "pcadbdpz" => App.Current.Language.GameClientTypePStr,
+                    "mihoyo" => App.Current.Language.GameClientTypePStr,
                     "bilibili" => App.Current.Language.GameClientTypeBStr,
-                    "mihoyo" => App.Current.Language.GameClientTypeMStr,
+                    "hoyoverse" => App.Current.Language.GameClientTypeMStr,
                     _ => App.Current.Language.GameClientTypeNullStr,
                 };
                 return $"{App.Current.Language.GameClientStr} : {gameClientType} ";
@@ -56,16 +56,16 @@ namespace GenShin_Launcher_Plus.Service
             {
                 int index = App.Current.DataModel.Cps switch
                 {
-                    "pcadbdpz" => 0,
+                    "mihoyo" => 0,
                     "bilibili" => 1,
-                    "mihoyo" => -1,
+                    "hoyoverse" => 2,
                     _ => -1,
                 };
                 string gameClientType = index switch
                 {
                     0 => App.Current.Language.GameClientTypePStr,
                     1 => App.Current.Language.GameClientTypeBStr,
-                    -1 => App.Current.Language.GameClientTypeMStr,
+                    2 => App.Current.Language.GameClientTypeMStr,
                     _ => App.Current.Language.GameClientTypeNullStr,
                 };
                 SwitchPort = $"{App.Current.Language.GameClientStr} : {gameClientType} ";
@@ -74,12 +74,12 @@ namespace GenShin_Launcher_Plus.Service
             set
             {
                 SetProperty(ref _GamePortListIndex, value);
-                if (App.Current.DataModel.Cps != "mihoyo")
+                if (App.Current.DataModel.Cps != "hoyoverse")
                 {
                     switch (value)
                     {
                         case 0:
-                            App.Current.DataModel.Cps = "pcadbdpz";
+                            App.Current.DataModel.Cps = "mihoyo";
                             App.Current.DataModel.Channel = 1;
                             App.Current.DataModel.Sub_channel = 1;
                             if (File.Exists(Path.Combine(App.Current.DataModel.GamePath, "YuanShen_Data/Plugins/PCGameSDK.dll")))
@@ -147,7 +147,7 @@ namespace GenShin_Launcher_Plus.Service
             {
                 return App.Current.DataModel.Cps switch
                 {
-                    "mihoyo" => "Hidden",
+                    "hoyoverse" => "Hidden",
                     _ => "Visible",
                 };
             }

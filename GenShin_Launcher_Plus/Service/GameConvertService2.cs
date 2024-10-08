@@ -37,73 +37,56 @@ namespace GenShin_Launcher_Plus.Service
         public ConvertService()
         {
             GamePath = App.Current.DataModel.GamePath;
+            App.Current.DataModel.Cps = ConfigValue(GamePath, "cps");
             CurrentPath = Environment.CurrentDirectory;
         }
-        /// <summary>
-        /// 检查Pkg版本
-        /// </summary>
-        /// <param name="scheme"></param>
-        /// <param name="vm"></param>
-        /// <returns></returns>
-        /// <exception cref="NotImplementedException"></exception>
-        /// 
-        public async Task<bool> CheckPackageVersionAsync(string scheme, SettingsPageViewModel vm)
+
+        public string ConfigValue(string URL, string code)
         {
-            if(App.Current.PkgUpdataModel.PkgVersion == "" || App.Current.PkgUpdataModel.PkgVersion == null || App.Current.PkgUpdataModel.PkgVersion == string.Empty)
+            string iniFilePath = Path.Combine(URL ?? "", "Config.ini");
+            if (!File.Exists(iniFilePath))
             {
-                for(int i = 0; i < 10; i++)
+                if (!Directory.Exists(@"Config"))
                 {
-                    vm.ConvertingLog = $"获取PKG版本号失败，尝试重新获取{i + 1}";
-                    if (App.Current?.PkgUpdataModel != null)
-                    {
-                        App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
-                    }
-                    else
-                    {
-                        // 初始化 PkgUpdataModel 或处理 null 情况
-                        App.Current.PkgUpdataModel = new PkgUpdataModel();
-                        App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
-                    }
-                    if (App.Current.PkgUpdataModel.PkgVersion != "" || App.Current.PkgUpdataModel.PkgVersion != null || App.Current.PkgUpdataModel.PkgVersion != string.Empty)
-                    {
-                        break;
-                    }
-                    await Task.Delay(1000);
+                    Directory.CreateDirectory("Config");
                 }
-                if (App.Current.PkgUpdataModel.PkgVersion == "" || App.Current.PkgUpdataModel.PkgVersion == null || App.Current.PkgUpdataModel.PkgVersion == string.Empty)
+                return null;
+            }
+
+            try
+            {
+                using (StreamReader iniFile = new StreamReader(iniFilePath))
                 {
-                    vm.ConvertingLog = $"获取PKG版本号失败，请检查你的网络设置。";
-                    return false;
+                    string strLine;
+                    string currentRoot = null;
+
+                    while ((strLine = iniFile.ReadLine()) != null)
+                    {
+                        strLine = strLine.Trim();
+                        if (string.IsNullOrEmpty(strLine)) continue;
+
+                        if (strLine.StartsWith("[") && strLine.EndsWith("]"))
+                        {
+                            currentRoot = strLine.Substring(1, strLine.Length - 2);
+                        }
+                        else
+                        {
+                            string[] keyPair = strLine.Split(new char[] { '=' }, 2);
+                            if (keyPair.Length > 0 && keyPair[0] == code)
+                            {
+                                return keyPair.Length > 1 ? keyPair[1].Trim() : null;
+                            }
+                        }
+                    }
                 }
             }
-            string pkgfile = App.Current.PkgUpdataModel.PkgVersion + "-1";
-            if (!File.Exists($"{scheme}/{pkgfile}"))
+            catch (Exception ex)
             {
-                vm.ConvertingLog = $"{App.Current.Language.NewPkgVer} : [{pkgfile}]\r\n即将下载最新版本转换包。\r\n请将下载好的转换包移动至本软件软件目录下。";
-                if(scheme == CN_DIRECTORY)
-                {
-                    ProcessStartInfo info = new()
-                    {
-                        FileName = "https://download.ganyu.us.kg/now/GenshinImpact/CnFile.pkg",
-                        UseShellExecute = true,
-                    };
-                    Process.Start(info);
-                }
-                else
-                {
-                    ProcessStartInfo info = new()
-                    {
-                        FileName = "https://download.ganyu.us.kg/now/GenshinImpact/GlobalFile.pkg",
-                        UseShellExecute = true,
-                    };
-                    Process.Start(info);
-                }
-                return false;
+                // 可根据需求进行日志记录或其他处理
+                Console.WriteLine($"Error reading config file: {ex.Message}");
             }
-            else
-            {
-                return true;
-            }
+
+            return null;
         }
 
         public async Task GetFilesNameFromJson(string jsonFilePath)
@@ -134,6 +117,170 @@ namespace GenShin_Launcher_Plus.Service
             {
                 MessageBox.Show(ex.Message);
             }
+        }
+
+        public void SetUI(int Is_Mihoyo)
+        {
+            switch (Is_Mihoyo)
+            {
+                case 0:
+                    App.Current.DataModel.Cps = "mihoyo";
+                    App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypePStr}";
+                    App.Current.NoticeOverAllBase.IsGamePortLists = "Visible";
+                    App.Current.NoticeOverAllBase.GamePortListIndex = 0;
+                    break;
+                case 1:
+                    App.Current.DataModel.Cps = "bilibili";
+                    App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypeBStr}";
+                    App.Current.NoticeOverAllBase.IsGamePortLists = "Visible";
+                    App.Current.NoticeOverAllBase.GamePortListIndex = 1;
+                    break;
+                case 2:
+                    App.Current.DataModel.Cps = "hoyoverse";
+                    App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypeMStr}";
+                    App.Current.NoticeOverAllBase.IsGamePortLists = "Hidden";
+                    App.Current.NoticeOverAllBase.GamePortListIndex = 2;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 获取所有文件加入到清单
+        /// </summary>
+        /// <param name="directory"></param>
+        /// <returns></returns>
+        public async Task GetFilesName(string directory)
+        {
+            try
+            {
+                DirectoryInfo directoryInfo = new(directory);
+                FileInfo[] files = directoryInfo.GetFiles();
+                foreach (FileInfo file in files)
+                {
+                    string temp = file.FullName.Replace(Path.Combine(Environment.CurrentDirectory, ReplaceSourceDirectory), "");
+                    GameFileList.Add(temp);
+                }
+                DirectoryInfo[] dirs = directoryInfo.GetDirectories();
+                if (dirs.Length > 0)
+                {
+                    foreach (DirectoryInfo dir in dirs)
+                    {
+                        await GetFilesName(dir.FullName);
+                    }
+                }
+
+                // 将 GameFileList 序列化为 JSON 并保存到 Config 文件夹中
+                string json = JsonSerializer.Serialize(GameFileList);
+                string configDirectory = Path.Combine(Environment.CurrentDirectory, "Config");
+                if (!Directory.Exists(configDirectory))
+                {
+                    Directory.CreateDirectory(configDirectory);
+                }
+                string filePath = Path.Combine(configDirectory, "GameFileList.json");
+                await File.WriteAllTextAsync(filePath, json);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 获取当前需要的Pkg前缀
+        /// </summary>
+        /// <returns></returns>
+        public string GetCurrentSchemeName()
+        {
+            if (File.Exists(Path.Combine(GamePath, YUANSHEN_EXE)))
+            {
+                return CN_DIRECTORY;
+            }
+            else if (File.Exists(Path.Combine(GamePath, GENSHINIMPACT_EXE)))
+            {
+                return GLOBAL_DIRECTORY;
+            }
+            else
+            {
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 检查Pkg版本
+        /// </summary>
+        /// <param name="scheme"></param>
+        /// <param name="vm"></param>
+        /// <returns></returns>
+        /// <exception cref="NotImplementedException"></exception>
+        /// 
+        public async Task<bool> CheckPackageVersionAsync(string scheme, SettingsPageViewModel vm)
+        {
+            int flag = 0;
+            while (string.IsNullOrEmpty(App.Current.PkgUpdataModel?.PkgVersion))
+            {
+                flag++;
+                if (App.Current?.PkgUpdataModel != null)
+                {
+                    App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
+                }
+                else
+                {
+                    // 初始化 PkgUpdataModel 或处理 null 情况
+                    App.Current.PkgUpdataModel = new PkgUpdataModel();
+                    App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
+                }
+
+                if (!string.IsNullOrEmpty(App.Current.PkgUpdataModel.PkgVersion))
+                {
+                    break;
+                }
+                if (flag >= 10)
+                {
+                    vm.ConvertingLog = $"获取PKG版本号失败，请检查你的网络设置。";
+                    return false;
+                }
+
+                vm.ConvertingLog = $"获取PKG版本号失败，尝试重新获取{flag}";
+                await Task.Delay(1000);
+            }
+
+            string gameversion = ConfigValue(GamePath, "game_version");
+            string pkgversion = ConfigValue(scheme, "game_version");
+
+            if (gameversion != App.Current.PkgUpdataModel.PkgVersion)
+            {
+                vm.ConvertingLog = $"当前游戏版本过低，请前往米哈游启动器更新游戏。\r\n当前游戏版本号：{gameversion}\r\n当前从API获取的游戏版本号：{App.Current.PkgUpdataModel.PkgVersion}\r\n";
+                return false;
+            }
+
+            if (pkgversion != App.Current.PkgUpdataModel.PkgVersion)
+            {
+                vm.ConvertingLog = $"{App.Current.Language.NewPkgVer} : [{pkgversion}]\r\n即将下载最新版本转换包。\r\n请将下载好的转换包移动至本软件软件目录下。";
+                await Task.Delay(1000);
+
+                if (scheme == CN_DIRECTORY)
+                {
+                    ProcessStartInfo info = new()
+                    {
+                        FileName = "https://download.ganyu.us.kg/now/GenshinImpact/CnFile.pkg",
+                        UseShellExecute = true,
+                    };
+                    Process.Start(info);
+                }
+                else
+                {
+                    ProcessStartInfo info = new()
+                    {
+                        FileName = "https://download.ganyu.us.kg/now/GenshinImpact/GlobalFile.pkg",
+                        UseShellExecute = true,
+                    };
+                    Process.Start(info);
+                }
+                return false;
+            }
+            return true;
         }
 
         /// <summary>
@@ -221,67 +368,6 @@ namespace GenShin_Launcher_Plus.Service
         }
 
         /// <summary>
-        /// 获取所有文件加入到清单
-        /// </summary>
-        /// <param name="directory"></param>
-        /// <returns></returns>
-        public async Task GetFilesName(string directory)
-        {
-            try
-            {
-                DirectoryInfo directoryInfo = new(directory);
-                FileInfo[] files = directoryInfo.GetFiles();
-                foreach (FileInfo file in files)
-                {
-                    string temp = file.FullName.Replace(Path.Combine(Environment.CurrentDirectory, ReplaceSourceDirectory), "");
-                    GameFileList.Add(temp);
-                }
-                DirectoryInfo[] dirs = directoryInfo.GetDirectories();
-                if (dirs.Length > 0)
-                {
-                    foreach (DirectoryInfo dir in dirs)
-                    {
-                        await GetFilesName(dir.FullName);
-                    }
-                }
-
-                // 将 GameFileList 序列化为 JSON 并保存到 Config 文件夹中
-                string json = JsonSerializer.Serialize(GameFileList);
-                string configDirectory = Path.Combine(Environment.CurrentDirectory, "Config");
-                if (!Directory.Exists(configDirectory))
-                {
-                    Directory.CreateDirectory(configDirectory);
-                }
-                string filePath = Path.Combine(configDirectory, "GameFileList.json");
-                await File.WriteAllTextAsync(filePath, json);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message);
-            }
-        }
-
-        /// <summary>
-        /// 获取当前需要的Pkg前缀
-        /// </summary>
-        /// <returns></returns>
-        public string GetCurrentSchemeName()
-        {
-            if (File.Exists(Path.Combine(GamePath, YUANSHEN_EXE)))
-            {
-                return CN_DIRECTORY;
-            }
-            else if (File.Exists(Path.Combine(GamePath, GENSHINIMPACT_EXE)))
-            {
-                return GLOBAL_DIRECTORY;
-            }
-            else
-            {
-                return string.Empty;
-            }
-        }
-
-        /// <summary>
         /// 替换游戏文件逻辑
         /// </summary>
         /// <param name="vm"></param>
@@ -321,8 +407,9 @@ namespace GenShin_Launcher_Plus.Service
                 }
             }
 
-            string cps = Scheme == CN_DIRECTORY ? "pcadbdpz" : "mihoyo";
-            vm.IsMihoyo = cps == "mihoyo" ? 0 : 2;
+            string cps = Scheme == CN_DIRECTORY ? "mihoyo" : "hoyoverse";
+            vm.IsMihoyo = cps == "hoyoverse" ? 0 : 2;
+            SetUI(vm.IsMihoyo);
             vm.ConvertingLog += $"所有文件替换完成，尽情享受吧...\r\n";
             vm.ConvertState = true;
         }
@@ -365,8 +452,9 @@ namespace GenShin_Launcher_Plus.Service
             File.Move(Path.Combine(GamePath, $"{gameExecute}.bak"), Path.Combine(GamePath, gameExecute));
             Directory.Move(Path.Combine(GamePath, GameSource), Path.Combine(GamePath, GameDest));
 
-            string cps = Scheme == CN_DIRECTORY ? "pcadbdpz" : "mihoyo";
-            vm.IsMihoyo = cps == "mihoyo" ? 0 : 2;
+            string cps = Scheme == CN_DIRECTORY ? "mihoyo" : "hoyoverse";
+            vm.IsMihoyo = cps == "hoyoverse" ? 0 : 2;
+            SetUI(vm.IsMihoyo);
             vm.ConvertingLog += $"所有文件还原完成，尽情享受吧...\r\n";
             vm.ConvertState = true;
         }
@@ -443,7 +531,7 @@ namespace GenShin_Launcher_Plus.Service
                 switch (vm.IsMihoyo)
                 {
                     case 0:
-                        App.Current.DataModel.Cps = "pcadbdpz";
+                        App.Current.DataModel.Cps = "mihoyo";
                         App.Current.DataModel.Channel = 1;
                         App.Current.DataModel.Sub_channel = 1;
                         if (File.Exists(Path.Combine(GamePath, $"YuanShen_Data/{bilibilisdk}")))
@@ -474,14 +562,14 @@ namespace GenShin_Launcher_Plus.Service
 
                         break;
                     case 2:
-                        App.Current.DataModel.Cps = "mihoyo";
+                        App.Current.DataModel.Cps = "hoyoverse";
                         App.Current.DataModel.Channel = 1;
                         App.Current.DataModel.Sub_channel = 0;
                         if (File.Exists(Path.Combine(GamePath, $"GenshinImpact_Data/{bilibilisdk}")))
                             File.Delete(Path.Combine(GamePath, $"GenshinImpact_Data/{bilibilisdk}"));
                         App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypeMStr}";
                         App.Current.NoticeOverAllBase.IsGamePortLists = "Hidden";
-                        App.Current.NoticeOverAllBase.GamePortListIndex = -1;
+                        App.Current.NoticeOverAllBase.GamePortListIndex = 2;
                         break;
                     default:
                         break;
