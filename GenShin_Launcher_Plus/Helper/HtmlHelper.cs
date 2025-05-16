@@ -86,15 +86,14 @@ namespace GenShin_Launcher_Plus.Core
 
         public static async Task<string> GetPkgVersionAsync()
         {
-            string Url = "https://hyp-api.mihoyo.com/hyp/hyp-connect/api/getGamePackages?launcher_id=jGHBHlcOq1&language=zh-cn";
+            string Url = "https://hyp-api.mihoyo.com/hyp/hyp-connect/api/getGameBranches?launcher_id=jGHBHlcOq1&language=zh-cn&game_ids[]=1Z8W5NHUQb";
             try
             {
                 JsonElement data = await GetAPIData(Url);
                 return data.GetProperty("data")
-                   .GetProperty("game_packages")[2]
+                   .GetProperty("game_branches")[0]
                    .GetProperty("main")
-                   .GetProperty("major")
-                   .GetProperty("version")
+                   .GetProperty("tag")
                    .ToString();
             }
             catch (KeyNotFoundException e)
