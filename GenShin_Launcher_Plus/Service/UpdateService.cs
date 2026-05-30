@@ -1,154 +1,106 @@
 ﻿using System;
-using System.IO;
-using System.Windows;
 using System.Diagnostics;
+using System.IO;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
 using GenShin_Launcher_Plus.Helper;
+using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service.IService;
 using GenShin_Launcher_Plus.ViewModels;
-using MahApps.Metro.Controls.Dialogs;
-using GenShin_Launcher_Plus.Core;
-using GenShin_Launcher_Plus.Models;
 using Newtonsoft.Json;
 
 namespace GenShin_Launcher_Plus.Service
 {
     public class UpdateService : IUpdateService
     {
-        /// <summary>
-        /// 更新服务的主方法
-        /// </summary>
-        /// <param name="vm"></param>
         public async void UpdateRun(UpdatePageViewModel vm)
         {
-            if (vm.ButtonIsEnabled)
+            if (!vm.ButtonIsEnabled)
             {
-                vm.ButtonIsEnabled = false;
-                vm.ViewControlVisibility = "Visibility";
-                string updatefile = vm.UseGlobalUrlCheck ? App.Current.UpdateObject.GlobalDownloadUrl : App.Current.UpdateObject.DownloadUrl;
-                if (await vm.DFC.HttpFileExistAsync(updatefile) == true)
+                DialogHelper.ShowInfo(App.Current.Language.RepWarnStr, App.Current.Language.TipsStr);
+                return;
+            }
+
+            vm.ButtonIsEnabled = false;
+            vm.ViewControlVisibility = Visibility.Visible;
+            string updateFile = vm.UseGlobalUrlCheck
+                ? App.Current.UpdateObject.GlobalDownloadUrl
+                : App.Current.UpdateObject.DownloadUrl;
+
+            if (await vm.DFC.HttpFileExistAsync(updateFile))
+            {
+                try
                 {
-                    //等待文件下载
-                    try
+                    await vm.DFC.DownloadHttpFileAsync(updateFile, "UpdateTemp.zip");
+                    var result = DialogHelper.ShowYesNo(
+                        App.Current.Language.DownloadComStr,
+                        App.Current.Language.TipsStr);
+
+                    if (result)
                     {
-                        await vm.DFC.DownloadHttpFileAsync(updatefile, @"UpdateTemp.zip");
-                        if ((await vm.dialogCoordinator.ShowMessageAsync(
-                            vm, App.Current.Language.TipsStr,
-                            App.Current.Language.DownloadComStr,
-                            MessageDialogStyle.AffirmativeAndNegative,
-                            new MetroDialogSettings()
-                            {
-                                AffirmativeButtonText = App.Current.Language.Cancel,
-                                NegativeButtonText = App.Current.Language.Determine
-                            })) != MessageDialogResult.Affirmative)
-                        {
-                            //执行更新操作
-                            if (FileHelper.UnZip("UpdateTemp.zip"))
-                            {
-                                File.Delete(@"UpdateTemp.zip");
-                                Process.Start(@"Update.exe");
-                                Environment.Exit(0);
-                            }
-                            else
-                            {
-                                File.Move(@"UpdateTemp.zip", @"UpdateTemp.upd");
-                                Process.Start(@"Update.exe");
-                                Environment.Exit(0);
-                            }
-                        }
+                        if (FileHelper.UnZip("UpdateTemp.zip"))
+                            File.Delete("UpdateTemp.zip");
                         else
-                        {
-                            vm.ButtonIsEnabled = true;
-                            vm.ViewControlVisibility = "Hidden";
-                        }
+                            File.Move("UpdateTemp.zip", "UpdateTemp.upd");
+
+                        Process.Start("Update.exe");
+                        Environment.Exit(0);
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        await vm.dialogCoordinator.ShowMessageAsync(
-                        vm, App.Current.Language.Error,
-                        ex.Message,
-                        MessageDialogStyle.Affirmative,
-                        new MetroDialogSettings()
-                        { AffirmativeButtonText = App.Current.Language.Determine });
-                        vm.ViewControlVisibility = "Hidden";
                         vm.ButtonIsEnabled = true;
+                        vm.ViewControlVisibility = Visibility.Collapsed;
                     }
                 }
-                else
+                catch (Exception ex)
                 {
-                    await vm.dialogCoordinator.ShowMessageAsync(
-                        vm, App.Current.Language.Error,
-                        App.Current.Language.DownFailedStr,
-                        MessageDialogStyle.Affirmative,
-                        new MetroDialogSettings()
-                        { AffirmativeButtonText = App.Current.Language.Determine });
-                    vm.ViewControlVisibility = "Hidden";
+                    DialogHelper.ShowError(ex.Message, App.Current.Language.Error);
+                    vm.ViewControlVisibility = Visibility.Collapsed;
                     vm.ButtonIsEnabled = true;
                 }
             }
             else
             {
-                await vm.dialogCoordinator.ShowMessageAsync(
-                    vm, App.Current.Language.TipsStr,
-                    App.Current.Language.RepWarnStr,
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = App.Current.Language.Determine });
+                DialogHelper.ShowError(App.Current.Language.DownFailedStr, App.Current.Language.Error);
+                vm.ViewControlVisibility = Visibility.Collapsed;
+                vm.ButtonIsEnabled = true;
             }
         }
 
-        /// <summary>
-        /// 检查是否存在更新信息
-        /// 初始化更新页面的内容
-        /// </summary>
-        /// <param name="main"></param>
         public async void CheckUpdate(MainWindow main)
         {
+            Logger.Debug("Checking for launcher updates", "Update");
             try
             {
-                FileHelper.ExtractEmbededAppResource("StaticRes/Update.dll", @"Update.exe");
+                FileHelper.ExtractEmbededAppResource("StaticRes/Update.dll", "Update.exe");
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message);
+                Logger.Warn($"Failed to extract Update.dll: {ex.Message}", "Update");
+                DialogHelper.ShowInfo(ex.Message);
             }
 
-            if (App.Current.DataModel.ReadLang == "Lang_CN" ||
-                App.Current.DataModel.ReadLang == null ||
-                App.Current.DataModel.ReadLang == string.Empty)
-            {
-                string json = await HtmlHelper.GetInfoFromHtmlAsync("UpdateCN");
-                App.Current.UpdateObject = JsonConvert.DeserializeObject<UpdateModel>(json) ?? new();
-            }
-            else
-            {
-                string json = await HtmlHelper.GetInfoFromHtmlAsync("UpdateGlobal");
-                App.Current.UpdateObject = JsonConvert.DeserializeObject<UpdateModel>(json) ?? new();
-            }
+            bool isCn = App.Current.DataModel.ReadLang is "Lang_CN" or null or "";
+            string json = await HtmlHelper.GetInfoFromHtmlAsync(isCn ? "UpdateCN" : "UpdateGlobal");
+            App.Current.UpdateObject = JsonConvert.DeserializeObject<UpdateModel>(json) ?? new();
 
-            if (App.Current?.PkgUpdataModel != null)
-            {
-                App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
-            }
-            else
-            {
-                // 初始化 PkgUpdataModel 或处理 null 情况
-                App.Current.PkgUpdataModel = new PkgUpdataModel();
-                App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
-            }
+            App.Current.PkgUpdataModel ??= new PkgUpdataModel();
+            App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
 
+            string newVer = App.Current.UpdateObject.Version;
+            bool requisite = App.Current.UpdateObject.RequisiteUpdate;
+            string currentVer = Application.ResourceAssembly.GetName().Version.ToString();
 
-            string newver = App.Current.UpdateObject.Version;
-            bool requisiteUpdate = App.Current.UpdateObject.RequisiteUpdate;
-            string version = Application.ResourceAssembly.GetName().Version.ToString();
-            if (version != newver &&
-                newver != null &&
-                newver != string.Empty &&
-                !App.Current.IsLoadUpdated)
+            if (currentVer != newVer && !string.IsNullOrEmpty(newVer) && !App.Current.IsLoadUpdated)
             {
-                if (App.Current.DataModel.IsCloseUpdate && requisiteUpdate ||
-                    !App.Current.DataModel.IsCloseUpdate)
+                Logger.Info($"New version available: {currentVer} -> {newVer} (req={requisite})", "Update");
+                if (!App.Current.DataModel.IsCloseUpdate || requisite)
                 {
-                    main.MainGrid.Children.Add(new Views.UpdatePage());
+                    var updatePage = new Views.UpdatePage();
+                    Grid.SetColumnSpan(updatePage, 2);
+                    Panel.SetZIndex(updatePage, 999);
+                    main.MainGrid.Children.Add(updatePage);
                     App.Current.IsLoadUpdated = true;
                 }
             }

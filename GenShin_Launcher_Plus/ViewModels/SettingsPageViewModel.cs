@@ -1,847 +1,487 @@
-﻿using GenShin_Launcher_Plus.Core;
-using GenShin_Launcher_Plus.Helper;
-using GenShin_Launcher_Plus.Models;
-using MahApps.Metro.Controls.Dialogs;
-using CommunityToolkit.Mvvm.Input;
-using CommunityToolkit.Mvvm.ComponentModel;
-using Microsoft.WindowsAPICodePack.Dialogs;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Input;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using GenShin_Launcher_Plus.Helper;
+using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service;
+using GenShin_Launcher_Plus.Services;
 using GenShin_Launcher_Plus.Service.IService;
 using Microsoft.Win32;
-using System.Windows;
 
 namespace GenShin_Launcher_Plus.ViewModels
 {
-    /// <summary>
-    /// SettingsPage的ViewModel 
-    /// </summary>
     public class SettingsPageViewModel : ObservableObject
     {
+        private IUserDataService? _userDataService;
+        private IRegistryService? _registryService;
+        private readonly ISettingService _settingService;
 
-        //构造器
-        private IDialogCoordinator dialogCoordinator;
-        public SettingsPageViewModel(IDialogCoordinator instance)
+        public SettingsPageViewModel(int mode = 0)
         {
-            dialogCoordinator = instance;
-
-            //_gameConvert = new GameConvertService();
-            _gameConvert = new ConvertService();
-            _userDataService = new UserDataService();
-            _registryService = new RegistryService();
             _settingService = new SettingService(this);
+            _isGameMode = mode == 0;
+            _flipViewSelectedIndex = mode == 0 ? 0 : 2;
+            _navScreenshots = App.Current.DataModel.NavScreenshots;
+            _navQQGroup = App.Current.DataModel.NavQQGroup;
+            _navAbout = App.Current.DataModel.NavAbout;
 
             DeleteUserCommand = new RelayCommand(DeleteUser);
             SaveSettingsCommand = new RelayCommand(SaveSettings);
+            SaveLangCommand = new RelayCommand(SaveAndRestart);
             ThisPageRemoveCommand = new RelayCommand(ThisPageRemove);
             ChooseGamePathCommand = new RelayCommand(ChooseGamePath);
-            //ChooseUnlockFpsCommand = new RelayCommand(ChooseUnlockFps);
-            GameFileConvertCommand = new AsyncRelayCommand(GameFileConvert);
-
-            SwitchAccountCommand = new RelayCommand(SwitchAccount);
-            //AddDailyImagePidCommand = new RelayCommand(AddDailyImagePid); => 新转换逻辑(编写中)
-            SwitchGameSettingsCommand = new RelayCommand(SwitchGameSettings);
-            SwitchConvertClientCommand = new RelayCommand(SwitchConvertClient);
-            SwitchProgarmSettingCommand = new RelayCommand(SwitchProgarmSetting);
-
+            SwitchAccountCommand = new RelayCommand(() => FlipViewSelectedIndex = 1);
+            SwitchGameSettingsCommand = new RelayCommand(() => FlipViewSelectedIndex = 0);
+            SwitchThemeSettingsCommand = new RelayCommand(() => FlipViewSelectedIndex = 2);
+            SwitchLanguageSettingsCommand = new RelayCommand(() => FlipViewSelectedIndex = 3);
+            SwitchFunctionSettingsCommand = new RelayCommand(() => FlipViewSelectedIndex = 4);
+            SwitchProgramSettingsTabCommand = new RelayCommand(() => FlipViewSelectedIndex = 5);
             CheckUpdateCommand = new RelayCommand(CheckUpdate);
             SaveBackgroundCommand = new RelayCommand(SaveBackground);
-            SaveDisPlaySizeCommand = new RelayCommand(SaveDisPlaySize);
-            RemoveDisPlaySizeCommand = new RelayCommand(RemoveDisPlaySize);
+            SaveDisplaySizeCommand = new RelayCommand(SaveDisplaySize);
+            RemoveDisplaySizeCommand = new RelayCommand(RemoveDisplaySize);
             SetMainBackgroundCommand = new RelayCommand(SetMainBackground);
-            SwitchLanguagePageCommand = new RelayCommand(SwitchLanguagePage);
-            OpenPkgDownloadUrlCommand = new RelayCommand(OpenPkgDownloadUrl);
-            OpenPrePkgDownloadUrlCommand = new RelayCommand(OpenPrePkgDownloadUrl);
-            OpenApplicationFolderCommand = new RelayCommand(OpenApplicationFolder);
-            RecoverDefaultSizeToMainCommand = new RelayCommand(RecoverDefaultSizeToMain);
-
-            IsWebToggleOnCommand = new RelayCommand(IsWebToggleOn);
+            OpenApplicationFolderCommand = new RelayCommand(() => FileHelper.OpenUrl(Environment.CurrentDirectory));
+            RecoverDefaultSizeCommand = new RelayCommand(RecoverDefaultSize);
             IsDailyBackgroundCommand = new RelayCommand(IsDailyBackground);
-            IsLocalDailyImageCommand = new RelayCommand(IsLocalDailyImageMethod);
+            SetAccentColorCommand = new RelayCommand<string>(SetAccentColor);
 
-            _UserLists = UserDataService.ReadUserList();
-            _GamePortLists = SettingService.CreateGamePortList();
-            _DisplaySizeLists = SettingService.CreateDisplaySizeList();
-            _DailyImageSource = SettingService.ReadDailyImageSourceFromJson();
-            _GameWindowModeList = SettingService.CreateGameWindowModeList();
+            _accentColorIndex = FindAccentColorIndex(App.Current.DataModel.AccentColor);
+            _userLists = UserDataService.ReadUserList();
+            _gamePortLists = SettingService.CreateGamePortList();
+            _displaySizeLists = SettingService.CreateDisplaySizeList();
+            _gameWindowModeList = SettingService.CreateGameWindowModeList();
         }
 
+        private readonly bool _isGameMode;
+        public bool IsGameMode => _isGameMode;
+        public bool IsProgramMode => !_isGameMode;
 
-        private IGameConvertService _gameConvert;
-        public IGameConvertService GameConvert { get => _gameConvert; }
+        private bool _isPageEnabled = true;
+        public bool IsPageEnabled { get => _isPageEnabled; set => SetProperty(ref _isPageEnabled, value); }
 
-        private ISettingService _settingService;
-        public ISettingService SettingService { get => _settingService; }
+        public Visibility GameSettingsVisible => _isGameMode ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility ProgramSettingsVisible => _isGameMode ? Visibility.Collapsed : Visibility.Visible;
 
-        private IUserDataService _userDataService;
-        public IUserDataService UserDataService { get => _userDataService; }
-
-        private IRegistryService _registryService;
-        public IRegistryService RegistryService { get => _registryService; }
-
-        public LanguageModel languages { get => App.Current.Language; }
-
-
-        private string _SettingTitleColor = "#FF272727";
-        public string SettingTitleColor
+        // Nav feature toggles
+        private bool _navScreenshots;
+        public bool NavScreenshots
         {
-            get => _SettingTitleColor;
-            set => SetProperty(ref _SettingTitleColor, value);
+            get => _navScreenshots;
+            set { _navScreenshots = value; App.Current.DataModel.NavScreenshots = value; OnPropertyChanged(); }
         }
-        private void DelaySaveButtonTitle()
+        private bool _navQQGroup;
+        public bool NavQQGroup
         {
-            Task task = new(() =>
+            get => _navQQGroup;
+            set { _navQQGroup = value; App.Current.DataModel.NavQQGroup = value; OnPropertyChanged(); }
+        }
+        private bool _navAbout;
+        public bool NavAbout
+        {
+            get => _navAbout;
+            set { _navAbout = value; App.Current.DataModel.NavAbout = value; OnPropertyChanged(); }
+        }
+        public Visibility NavScreenshotsVisible => _isGameMode ? Visibility.Collapsed : Visibility.Visible;
+
+        // Language selection
+        public List<LanguageListModel> LangList => App.Current.LangList;
+        public int LangIndex
+        {
+            get
             {
-                SettingTitleColor = "#FF008C02";
+                var code = LanguageService.Instance.CurrentLangCode;
+                var list = App.Current.LangList;
+                if (list == null) return 0;
+                for (int i = 0; i < list.Count; i++)
+                    if (list[i].LangFileName == code) return i;
+                return 0;
+            }
+        }
+        private string? _switchLang;
+        public string? SwitchLang { get => _switchLang; set => SetProperty(ref _switchLang, value); }
+        public ICommand SaveLangCommand { get; }
+
+        private void SaveAndRestart()
+        {
+            if (!string.IsNullOrEmpty(SwitchLang))
+                LanguageService.Instance.SwitchLanguage(SwitchLang);
+            App.Current.DataModel.SaveDataToFile();
+            App.Current.Language.RaiseAllChanged();
+            ThisPageRemove();
+        }
+
+        public ISettingService SettingService => _settingService;
+        public IUserDataService UserDataService => _userDataService ??= new UserDataService();
+        public IRegistryService RegistryService => _registryService ??= new RegistryService();
+        public LanguageModel languages => App.Current.Language;
+
+        private string _settingTitleColor = "#FF272727";
+        public string SettingTitleColor { get => _settingTitleColor; set => SetProperty(ref _settingTitleColor, value); }
+
+        private void FlashSaveIndicator()
+        {
+            Task.Run(() =>
+            {
+                SettingTitleColor = "#FF0F7B0F";
                 Thread.Sleep(1500);
                 SettingTitleColor = "#FF272727";
             });
-            task.Start();
         }
 
+        public string SettingsTitle => languages.SettingsTitle;
 
-        public bool ConvertState { get; set; }
-        public string SettingsTitle { get => languages.SettingsTitle; }
-
-
-        //设置界面UI刷新绑定数据
-        private string _Width;
-        public string Width
-        {
-            get => _Width;
-            set
-            {
-                App.Current.DataModel.Width = value;
-                SetProperty(ref _Width, value);
-            }
-        }
-
-        private string _Height;
-        public string Height
-        {
-            get => _Height;
-            set
-            {
-                App.Current.DataModel.Height = value;
-                SetProperty(ref _Height, value);
-            }
-        }
-
-        private int _DisPlaySizeIndex = -1;
-        public int DisPlaySizeIndex
-        {
-            get => _DisPlaySizeIndex;
-            set => SetProperty(ref _DisPlaySizeIndex, value);
-        }
-
-        private bool _IsUnFPS;
-        public bool IsUnFPS
-        {
-            get => _IsUnFPS;
-            set
-            {
-                App.Current.DataModel.IsUnFPS = value;
-                SetProperty(ref _IsUnFPS, value);
-            }
-        }
-
-        private bool _IsLocalDailyImage;
-        public bool IsLocalDailyImage
-        {
-            get => _IsLocalDailyImage;
-            set
-            {
-                App.Current.DataModel.IsLocalDailyImage = value;
-                SetProperty(ref _IsLocalDailyImage, value);
-            }
-        }
-
-        private string _GamePath;
-        public string GamePath
-        {
-            get => _GamePath;
-            set
-            {
-                App.Current.DataModel.GamePath = value;
-                SetProperty(ref _GamePath, value);
-            }
-        }
-
-        private string _SwitchUser;
-        public string SwitchUser
-        {
-            get => _SwitchUser;
-            set
-            {
-                if (value != null)
-                {
-                    App.Current.DataModel.SwitchUser = value;
-                    SetProperty(ref _SwitchUser, value);
-                }
-            }
-        }
-
-        private int _IsMihoyo;
+        // Current server display (read-only, managed by GameBiz selector)
         public int IsMihoyo
         {
-            get => _IsMihoyo;
-            set => SetProperty(ref _IsMihoyo, value);
+            get
+            {
+                var biz = App.Current.DataModel.ActiveBiz;
+                return biz.IsBilibili() ? 1 : biz.IsGlobalServer() ? 2 : 0;
+            }
         }
 
-        private string _InputPid;
-        public string InputPid
+        public string CurrentServerDisplay
         {
-            get => _InputPid;
-            set => SetProperty(ref _InputPid, value);
+            get
+            {
+                var biz = App.Current.DataModel.ActiveBiz;
+                if (biz.IsChinaServer()) return languages.GameClientTypePStr;
+                if (biz.IsGlobalServer()) return languages.GameClientTypeMStr;
+                if (biz.IsBilibili()) return languages.GameClientTypeBStr;
+                return languages.GameClientTypeNullStr;
+            }
         }
 
-        private int _DailyImagePidIndex = -1;
-        public int DailyImagePidIndex
+        private string _width = string.Empty;
+        public string Width
         {
-            get => _DailyImagePidIndex;
-            set => SetProperty(ref _DailyImagePidIndex, value);
+            get => _width;
+            set { App.Current.DataModel.Width = value; SetProperty(ref _width, value); }
         }
 
-        private bool _IsPopup;
+        private string _height = string.Empty;
+        public string Height
+        {
+            get => _height;
+            set { App.Current.DataModel.Height = value; SetProperty(ref _height, value); }
+        }
+
+        private int _displaySizeIndex = -1;
+        public int DisplaySizeIndex { get => _displaySizeIndex; set => SetProperty(ref _displaySizeIndex, value); }
+
+        private string _gamePath = string.Empty;
+        public string GamePath
+        {
+            get => _gamePath;
+            set { App.Current.DataModel.GamePath = value; SetProperty(ref _gamePath, value); }
+        }
+
+        private string? _switchUser;
+        public string? SwitchUser
+        {
+            get => _switchUser;
+            set { if (value != null) { App.Current.DataModel.SwitchUser = value; SetProperty(ref _switchUser, value); } }
+        }
+
+        private bool _isPopup;
         public bool IsPopup
         {
-            get => _IsPopup;
-            set
-            {
-                App.Current.DataModel.IsPopup = value;
-                SetProperty(ref _IsPopup, value);
-            }
+            get => _isPopup;
+            set { App.Current.DataModel.IsPopup = value; SetProperty(ref _isPopup, value); }
         }
 
-        private ushort _FullSize;
+        private ushort _fullSize;
         public ushort FullSize
         {
-            get => _FullSize;
-            set
-            {
-                App.Current.DataModel.FullSize = value;
-                SetProperty(ref _FullSize, value);
-            }
+            get => _fullSize;
+            set { App.Current.DataModel.FullSize = value; SetProperty(ref _fullSize, value); }
         }
 
-        private string _MaxFps;
-        public string MaxFps
-        {
-            get => _MaxFps;
-            set
-            {
-                App.Current.DataModel.MaxFps = value;
-                SetProperty(ref _MaxFps, value);
-            }
-        }
-
-        private bool _IsWebBg;
-        public bool IsWebBg
-        {
-            get => _IsWebBg;
-            set
-            {
-                App.Current.DataModel.IsWebBg = value;
-                SetProperty(ref _IsWebBg, value);
-            }
-        }
-
-        private bool _UseXunkongWallpaper;
+        private bool _useXunkongWallpaper;
         public bool UseXunkongWallpaper
         {
-            get => _UseXunkongWallpaper;
-            set
-            {
-                App.Current.DataModel.UseXunkongWallpaper = value;
-                SetProperty(ref _UseXunkongWallpaper, value);
-            }
+            get => _useXunkongWallpaper;
+            set { App.Current.DataModel.UseXunkongWallpaper = value; SetProperty(ref _useXunkongWallpaper, value); }
         }
 
-        private bool _IsRunThenClose;
+        private bool _isRunThenClose;
         public bool IsRunThenClose
         {
-            get => _IsRunThenClose;
-            set
-            {
-                App.Current.DataModel.IsRunThenClose = value;
-                SetProperty(ref _IsRunThenClose, value);
-            }
+            get => _isRunThenClose;
+            set { App.Current.DataModel.IsRunThenClose = value; SetProperty(ref _isRunThenClose, value); }
         }
 
-        private bool _IsCloseUpdate;
+        private string _customBackgroundPath = string.Empty;
+        public string CustomBackgroundPath
+        {
+            get => _customBackgroundPath;
+            set => SetProperty(ref _customBackgroundPath, value);
+        }
+
+        private bool _isCloseUpdate;
         public bool IsCloseUpdate
         {
-            get => _IsCloseUpdate;
-            set
-            {
-                App.Current.DataModel.IsCloseUpdate = value;
-                SetProperty(ref _IsCloseUpdate, value);
-            }
+            get => _isCloseUpdate;
+            set { App.Current.DataModel.IsCloseUpdate = value; SetProperty(ref _isCloseUpdate, value); }
         }
 
-        private int _FlipViewSelectedIndex;
-        public int FlipViewSelectedIndex
+        private int _flipViewSelectedIndex;
+        public int FlipViewSelectedIndex { get => _flipViewSelectedIndex; set => SetProperty(ref _flipViewSelectedIndex, value); }
+
+        private List<UserListModel> _userLists;
+        public List<UserListModel> UserLists { get => _userLists; set => SetProperty(ref _userLists, value); }
+
+        private List<GamePortListModel> _gamePortLists;
+        public List<GamePortListModel> GamePortLists => _gamePortLists;
+
+        private List<DisplaySizeListModel>? _displaySizeLists;
+        public List<DisplaySizeListModel>? DisplaySizeLists
         {
-            get => _FlipViewSelectedIndex;
-            set => SetProperty(ref _FlipViewSelectedIndex, value);
-        }
-
-
-        private List<DailyImageArray> _DailyImageSource;
-        public List<DailyImageArray> DailyImageSource
-        {
-            get
+            get => _displaySizeLists ?? new List<DisplaySizeListModel>
             {
-                if (_DailyImageSource == null)
-                {
-                    return new List<DailyImageArray>()
-                    {
-                        new DailyImageArray
-                        {
-                            ImagePid = "无已保存的Pid数据",
-                        }
-                    };
-                }
-                else { return _DailyImageSource; }
-            }
-            set => SetProperty(ref _DailyImageSource, value);
+                new() { SizeName = languages.NoSavedPresets, IsNull = true }
+            };
+            set => SetProperty(ref _displaySizeLists, value);
         }
 
+        private List<GameWindowModeListModel> _gameWindowModeList;
+        public List<GameWindowModeListModel> GameWindowModeList => _gameWindowModeList;
 
-        //选中分辨率进行调整
         public string SwitchSize { set => SettingService.SetDisplaySelectedValue(value, this); }
 
+        // --- Commands ---
+        public ICommand DeleteUserCommand { get; }
+        public ICommand SaveSettingsCommand { get; }
+        public ICommand ThisPageRemoveCommand { get; }
+        public ICommand ChooseGamePathCommand { get; }
+        public ICommand SwitchAccountCommand { get; }
+        public ICommand SwitchGameSettingsCommand { get; }
+        public ICommand SwitchProgramSettingCommand { get; }
+        public ICommand SwitchFunctionSettingsCommand { get; }
+        public ICommand SwitchThemeSettingsCommand { get; }
+        public ICommand SwitchLanguageSettingsCommand { get; }
+        public ICommand SwitchProgramSettingsTabCommand { get; }
+        public ICommand CheckUpdateCommand { get; }
+        public ICommand SaveBackgroundCommand { get; }
+        public ICommand SaveDisplaySizeCommand { get; }
+        public ICommand RemoveDisplaySizeCommand { get; }
+        public ICommand SetMainBackgroundCommand { get; }
+        public ICommand OpenApplicationFolderCommand { get; }
+        public ICommand RecoverDefaultSizeCommand { get; }
+        public ICommand IsDailyBackgroundCommand { get; }
 
-        //开始转换显示的等待条
-        private string _ProgressBar = "Hidden";
-        public string ProgressBar
+        private void ChooseGamePath()
         {
-            get => _ProgressBar;
-            set => SetProperty(ref _ProgressBar, value);
-        }
-
-        //转换时的日志列表
-        private string _ConvertingLog;
-        public string ConvertingLog
-        {
-            get => _ConvertingLog;
-            set => SetProperty(ref _ConvertingLog, value);
-        }
-
-        //转换时的控件状态
-        private string _PageUiStatus = "true";
-        public string PageUiStatus
-        {
-            get => _PageUiStatus;
-            set => SetProperty(ref _PageUiStatus, value);
-        }
-
-        //转换状态
-        private string _StateIndicator;
-        public string StateIndicator
-        {
-            get => _StateIndicator;
-            set => SetProperty(ref _StateIndicator, value);
-        }
-
-
-        //用户列表
-        private List<UserListModel> _UserLists;
-        public List<UserListModel> UserLists
-        {
-            get => _UserLists;
-            set => SetProperty(ref _UserLists, value);
-        }
-
-        //游戏客户端列表
-        private List<GamePortListModel> _GamePortLists;
-        public List<GamePortListModel> GamePortLists { get => _GamePortLists; }
-
-        //预设分辨率列表
-        private List<DisplaySizeListModel> _DisplaySizeLists;
-        public List<DisplaySizeListModel> DisplaySizeLists
-        {
-            get
+            var dialog = new System.Windows.Forms.FolderBrowserDialog
             {
-                if (_DisplaySizeLists == null)
-                {
-                    return new List<DisplaySizeListModel>()
-                    {
-                        new DisplaySizeListModel
-                        {
-                            SizeName = "没有已保存的预设选项",
-                            IsNull = true,
-                        }
-                    };
-                }
-                else { return _DisplaySizeLists; }
-            }
-            set => SetProperty(ref _DisplaySizeLists, value);
+                Description = languages.GameDirMsg,
+                ShowNewFolderButton = false
+            };
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                GamePath = dialog.SelectedPath;
         }
 
-        //游戏窗口模式列表
-        private List<GameWindowModeListModel> _GameWindowModeList;
-        public List<GameWindowModeListModel> GameWindowModeList { get => _GameWindowModeList; }
-
-
-        /// <summary>
-        /// 切换FlipView的SelectedIndex方法集
-        /// </summary>
-        /// 
-        public ICommand SwitchGameSettingsCommand { get; set; }
-        private void SwitchGameSettings()
-        {
-            FlipViewSelectedIndex = 0;
-        }
-
-        public ICommand SwitchConvertClientCommand { get; set; }
-        private void SwitchConvertClient()
-        {
-            FlipViewSelectedIndex = 1;
-        }
-
-        public ICommand SwitchAccountCommand { get; set; }
-        private void SwitchAccount()
-        {
-            FlipViewSelectedIndex = 2;
-        }
-
-        public ICommand SwitchProgarmSettingCommand { get; set; }
-        private void SwitchProgarmSetting()
-        {
-            FlipViewSelectedIndex = 3;
-        }
-
-        //保存设置的分辨率到列表
-        public ICommand SaveDisPlaySizeCommand { get; set; }
-        private async void SaveDisPlaySize()
+        private void SaveDisplaySize()
         {
             if (FileHelper.IsInt(Width) && FileHelper.IsInt(Height))
             {
                 SettingService.SaveDisplaySizeToList(this, Width, Height);
-                await dialogCoordinator.ShowMessageAsync(
-                   this, languages.TipsStr,
-                   "添加自定义分辨率到预设列表成功！",
-                   MessageDialogStyle.Affirmative,
-                   new MetroDialogSettings()
-                   { AffirmativeButtonText = languages.Determine });
+                DialogHelper.ShowInfo(languages.AddResolutionSuccess, languages.TipsStr);
             }
-            else
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                   this, languages.Error,
-                   "请输入正确的分辨率宽高数值！",
-                   MessageDialogStyle.Affirmative,
-                   new MetroDialogSettings()
-                   { AffirmativeButtonText = languages.Determine });
-            }
+            else DialogHelper.ShowWarning(languages.ResolutionInputError, languages.Error);
         }
 
-
-        //删除设置的分辨率到列表
-        public ICommand RemoveDisPlaySizeCommand { get; set; }
-        private async void RemoveDisPlaySize()
+        private void RemoveDisplaySize()
         {
-
-            if (DisplaySizeLists.Count > 0 && DisPlaySizeIndex != -1)
+            if (DisplaySizeLists != null && DisplaySizeIndex >= 0)
             {
                 SettingService.RemoveDisplaySizeToList(this);
-                await dialogCoordinator.ShowMessageAsync(
-                   this, languages.TipsStr,
-                   "删除自定义分辨率预设成功！",
-                   MessageDialogStyle.Affirmative,
-                   new MetroDialogSettings()
-                   { AffirmativeButtonText = languages.Determine });
+                DialogHelper.ShowInfo(languages.RemoveResolutionSuccess, languages.TipsStr);
             }
-            else
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                   this, languages.Error,
-                   "没有选中需要删除的预设！",
-                   MessageDialogStyle.Affirmative,
-                   new MetroDialogSettings()
-                   { AffirmativeButtonText = languages.Determine });
-            }
+            else DialogHelper.ShowWarning(languages.NoPresetSelected, languages.Error);
         }
 
-
-        //恢复默认主窗口大小
-        public ICommand RecoverDefaultSizeToMainCommand { get; set; }
-        private void RecoverDefaultSizeToMain()
+        private void RecoverDefaultSize()
         {
-            App.Current.ThisMainWindow.Height = 730;
-            App.Current.ThisMainWindow.Width = 1280;
+            double w = SystemParameters.PrimaryScreenWidth * 0.5;
+            double h = SystemParameters.PrimaryScreenHeight * 0.5;
+            App.Current.ThisMainWindow.Width = w;
+            App.Current.ThisMainWindow.Height = h;
+            App.Current.DataModel.MainWidth = w;
+            App.Current.DataModel.MainHeight = h;
+            App.Current.DataModel.SaveDataToFile();
         }
 
-        //选择游戏路径的命令
-        public ICommand ChooseGamePathCommand { get; set; }
-        private void ChooseGamePath()
-        {
-            CommonOpenFileDialog dialog = new(languages.GameDirMsg);
-            dialog.IsFolderPicker = true;
-            if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
-            {
-                GamePath = dialog.FileName;
-            }
-        }
-
-        //跳转到下载Pkg文件的链接命令
-        public ICommand OpenPkgDownloadUrlCommand { get; set; }
-        private void OpenPkgDownloadUrl()
-        {
-            if (new ConvertService().GetCurrentSchemeName() == "CnFile")
-            {
-                FileHelper.OpenUrl("https://download.xingdream.top/now/GenshinImpact/GlobalFile.pkg");
-            }
-            else
-            {
-                FileHelper.OpenUrl("https://download.xingdream.top/now/GenshinImpact/CnFile.pkg");
-            }
-        }
-
-        public ICommand OpenPrePkgDownloadUrlCommand { get; set; }
-        private void OpenPrePkgDownloadUrl()
-        {
-            if (new ConvertService().GetCurrentSchemeName() == "CnFile")
-            {
-                FileHelper.OpenUrl("https://download.xingdream.top/pre/GenshinImpact/GlobalFile.pkg");
-            }
-            else
-            {
-                FileHelper.OpenUrl("https://download.xingdream.top/pre/GenshinImpact/CnFile.pkg");
-            }
-        }
-
-        //设置页面手动检查更新命令
-        public ICommand CheckUpdateCommand { get; set; }
-        private async void CheckUpdate()
+        private void CheckUpdate()
         {
             App.Current.IsLoadUpdated = false;
             App.Current.DataModel.IsCloseUpdate = false;
             new UpdateService().CheckUpdate(App.Current.ThisMainWindow);
         }
 
-        //跳转到设置程序语言界面
-        public ICommand SwitchLanguagePageCommand { get; set; }
-        private void SwitchLanguagePage()
-        {
-            App.Current.ThisMainWindow.SwitchLanguages.Children.Clear();
-            App.Current.ThisMainWindow.SwitchLanguages.Children.Add(new Views.LanguagesPage());
-            App.Current.ThisMainWindow.MainFlipView.SelectedIndex = 3;
-        }
-
-        //打开本程序目录的命令
-        public ICommand OpenApplicationFolderCommand { get; set; }
-        private void OpenApplicationFolder()
-        {
-            FileHelper.OpenUrl(Environment.CurrentDirectory);
-        }
-
-        //保存今日[每日一图]的图片文件
-        public ICommand SaveBackgroundCommand { get; set; }
         private async void SaveBackground()
         {
-            SaveFileDialog dialog = new()
+            var dialog = new Microsoft.Win32.SaveFileDialog
             {
                 Filter = "JPG Files (*.jpg)|*.jpg",
-                Title = "保存到图片文件",
+                Title = languages.SaveImageDialogTitle,
                 DefaultExt = "jpg"
             };
-
-            if (File.Exists(@"Config/Wallpaper.jpg") && dialog.ShowDialog() == true)
+            if (dialog.ShowDialog() != true) return;
+            try
             {
-                File.Copy(@"Config/Wallpaper.jpg", dialog.FileName, true);
-                await dialogCoordinator.ShowMessageAsync(
-                    this, languages.TipsStr,
-                    $"已将今日一图保存至：{dialog.FileName}",
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
-            }
-            else
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                    this, languages.Error,
-                    "没有已经缓存的每日一图",
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
-
-            }
-        }
-
-        //设置背景图片的命令
-        public ICommand SetMainBackgroundCommand { get; set; }
-        private async void SetMainBackground()
-        {
-            CommonOpenFileDialog dialog = new();
-            dialog.IsFolderPicker = false;
-            if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
-            {
-                string extensionName = Path.GetExtension(dialog.FileName);
-                if (extensionName.ToLower() == ".png" ||
-                    extensionName.ToLower() == ".jpg" ||
-                    extensionName.ToLower() == ".webp")
+                string directUrl = App.Current.BackgroundModel?.BackgroundUrl ?? string.Empty;
+                if (!string.IsNullOrEmpty(directUrl))
                 {
-                    App.Current.DataModel.BackgroundPath = dialog.FileName;
-                    IsWebBg = true;
-                    UseXunkongWallpaper = false;
-                    _ = new MainService(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
-                }
-                else
-                {
-                    await dialogCoordinator.ShowMessageAsync(
-                        this, languages.Error,
-                        "仅支持png、jpg或webp文件，请选择支持的格式",
-                        MessageDialogStyle.Affirmative,
-                        new MetroDialogSettings()
-                        { AffirmativeButtonText = languages.Determine });
-                }
-            }
-        }
-
-        //选中不使用网络背景
-        public ICommand IsWebToggleOnCommand { get; set; }
-        private async void IsWebToggleOn()
-        {
-            if (App.Current.IsLoadingBackground)
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                    this, languages.TipsStr,
-                    "请先等待当前背景加载完毕",
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
-                if (IsWebBg)
-                {
-                    IsWebBg = !IsWebBg;
-                }
-                return;
-            }
-            if (IsWebBg)
-            {
-                UseXunkongWallpaper = false;
-                IsLocalDailyImage = false;
-            }
-            _ = new MainService(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
-        }
-
-        //选中每日一图
-        public ICommand IsDailyBackgroundCommand { get; set; }
-        private async void IsDailyBackground()
-        {
-            if (App.Current.IsLoadingBackground)
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                    this, languages.TipsStr,
-                    "请先等待当前背景加载完毕",
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
-                if (UseXunkongWallpaper)
-                {
-                    UseXunkongWallpaper = !UseXunkongWallpaper;
-                }
-                return;
-            }
-            if (UseXunkongWallpaper)
-            {
-                IsWebBg = false;
-                IsLocalDailyImage = false;
-            }
-            _ = new MainService(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
-        }
-
-        //选中使用本地每日一图
-        public ICommand IsLocalDailyImageCommand { get; set; }
-        private async void IsLocalDailyImageMethod()
-        {
-            if (App.Current.IsLoadingBackground)
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                    this, languages.TipsStr,
-                    "请先等待当前背景加载完毕",
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
-                if (IsLocalDailyImage)
-                {
-                    IsLocalDailyImage = !IsLocalDailyImage;
-                }
-                return;
-            }
-            if (IsLocalDailyImage)
-            {
-                UseXunkongWallpaper = false;
-                IsWebBg = false;
-            }
-            _ = new MainService(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
-        }
-
-        //选择解锁FPS的指令
-        /*public ICommand ChooseUnlockFpsCommand { get; set; }
-        private async void ChooseUnlockFps()
-        {
-            if (IsUnFPS)
-            {
-                if ((await dialogCoordinator.ShowMessageAsync(
-                    this, languages.SevereWarning,
-                    languages.SevereWarningStr,
-                    MessageDialogStyle.AffirmativeAndNegative,
-                    new MetroDialogSettings()
+                    using var client = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler
                     {
-                        AffirmativeButtonText = languages.Cancel,
-                        NegativeButtonText = languages.Determine
-                    })) != MessageDialogResult.Affirmative)
-                {
-                    IsUnFPS = true;
+                        AutomaticDecompression = System.Net.DecompressionMethods.All
+                    });
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+                    var bytes = await client.GetByteArrayAsync(directUrl);
+                    File.WriteAllBytes(dialog.FileName, bytes);
+                    DialogHelper.ShowInfo(string.Format(languages.SaveImageSuccess, dialog.FileName), languages.TipsStr);
+                    return;
                 }
-                else
+                if (File.Exists("Config/Wallpaper.jpg"))
                 {
-                    IsUnFPS = false;
+                    File.Copy("Config/Wallpaper.jpg", dialog.FileName, true);
+                    DialogHelper.ShowInfo(string.Format(languages.SaveImageSuccess, dialog.FileName), languages.TipsStr);
                 }
-                App.Current.DataModel.IsUnFPS = IsUnFPS;
             }
-        }*/
-
-        //删除账号的命令
-        public ICommand DeleteUserCommand { get; set; }
-        private async void DeleteUser()
-        {
-            if (SwitchUser != "" && SwitchUser != null)
+            catch
             {
-                if ((await dialogCoordinator.ShowMessageAsync(
-                    this, languages.Warning,
-                    $"{languages.WarningDAW}[{SwitchUser}] ? !",
-                    MessageDialogStyle.AffirmativeAndNegative,
-                    new MetroDialogSettings()
-                    {
-                        AffirmativeButtonText = languages.Cancel,
-                        NegativeButtonText = languages.Determine
-                    })) != MessageDialogResult.Affirmative)
+                if (File.Exists("Config/Wallpaper.jpg"))
                 {
-                    File.Delete(Path.Combine(@"UserData", SwitchUser));
+                    File.Copy("Config/Wallpaper.jpg", dialog.FileName, true);
+                    DialogHelper.ShowInfo(string.Format(languages.SaveImageSuccess, dialog.FileName), languages.TipsStr);
+                }
+            }
+        }
+
+        private void SetMainBackground()
+        {
+            var dialog = new OpenFileDialog
+            {
+                Filter = "Image Files (*.png;*.jpg;*.webp)|*.png;*.jpg;*.webp",
+                Title = languages.ChooseBgDialogTitle
+            };
+            if (dialog.ShowDialog() == true)
+            {
+                App.Current.DataModel.BackgroundPath = dialog.FileName;
+                CustomBackgroundPath = dialog.FileName;
+                UseXunkongWallpaper = false;
+                _ = new MainService(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
+            }
+        }
+
+        private void IsDailyBackground()
+        {
+            if (App.Current.IsLoadingBackground)
+            {
+                DialogHelper.ShowInfo(languages.WaitBgLoading, languages.TipsStr);
+                if (UseXunkongWallpaper) UseXunkongWallpaper = !UseXunkongWallpaper;
+                return;
+            }
+            _ = new MainService(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
+        }
+
+        private void DeleteUser()
+        {
+            if (!string.IsNullOrEmpty(SwitchUser))
+            {
+                var result = DialogHelper.ShowYesNo($"{languages.WarningDAW}[{SwitchUser}] ? !", languages.Warning);
+                if (result)
+                {
+                    File.Delete(Path.Combine("UserData", SwitchUser));
                     UserLists = UserDataService.ReadUserList();
                     App.Current.NoticeOverAllBase.UserLists = UserLists;
                 }
             }
-            else
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                    this, languages.Error, languages.ErrorSA,
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
-            }
+            else DialogHelper.ShowWarning(languages.ErrorSA, languages.Error);
         }
 
-        //保存设置的命令
-        public ICommand SaveSettingsCommand { get; set; }
-        private async void SaveSettings()
+        private void SaveSettings()
         {
-            string CnGamePath = Path.Combine(GamePath, "Yuanshen.exe");
-            string GlobalGamePath = Path.Combine(GamePath, "GenshinImpact.exe");
-            if (GamePath != "" && File.Exists(CnGamePath) || File.Exists(GlobalGamePath))
+            var biz = App.Current.DataModel.ActiveBiz;
+            var game = App.Current.DataModel.ActiveGame;
+            if (game == null) return;
+            string exe = game.GetExeName(biz);
+            string exePath = Path.Combine(GamePath, exe);
+            if (string.IsNullOrEmpty(GamePath) || !File.Exists(exePath))
             {
-                App.Current.DataModel.GamePath = GamePath;
-            }
-            else
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                    this, languages.Error, languages.PathErrorMessageStr,
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
+                DialogHelper.ShowWarning(languages.PathErrorMessageStr, languages.Error);
                 return;
             }
-            if (SwitchUser != null && SwitchUser != "")
+            App.Current.DataModel.GamePath = GamePath;
+            Logger.Info($"Saving game path: {GamePath} for {biz}", "Settings");
+            if (!string.IsNullOrEmpty(SwitchUser))
             {
-                App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab}：{SwitchUser}";
-                App.Current.NoticeOverAllBase.IsSwitchUser = "Visible";
+                App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab}��{SwitchUser}";
+                App.Current.NoticeOverAllBase.IsSwitchUser = Visibility.Visible;
                 RegistryService.SetToRegistry(SwitchUser);
             }
-            //自定义每日一图(编写中)
-            /*            if(DailyImagePidIndex>-1&& DailyImagePidIndex<DailyImageSource.Count)
-                        {        
-                            App.Current.DataModel.ImagePid = DailyImageSource[DailyImagePidIndex].ImagePid;
-                            App.Current.DataModel.ImageDate = DailyImageSource[DailyImagePidIndex].ImageDate;
-                            App.Current.DataModel.UseXunkongWallpaper = false;
-                        }*/
             App.Current.DataModel.Height = Height;
             App.Current.DataModel.Width = Width;
-            GameConvert.SaveGameConfig(this);
-            DelaySaveButtonTitle();
+            FlashSaveIndicator();
             App.Current.DataModel.SaveDataToFile();
             ThisPageRemove();
         }
 
-        /*        //添加自定义PID到自定义每日一图列表
-                public ICommand AddDailyImagePidCommand { get; set; }
-                private async void AddDailyImagePid()
-                {
-                    if (!_settingService.SetDailyImageDataToJson(this))
-                    {
-                        await dialogCoordinator.ShowMessageAsync(
-                            this, languages.Error, "已有相同PID在列表中",
-                            MessageDialogStyle.Affirmative,
-                            new MetroDialogSettings()
-                            { AffirmativeButtonText = languages.Determine });
-                    }
-                }*/
-
-        //关闭设置页面
-        public ICommand ThisPageRemoveCommand { get; set; }
         private void ThisPageRemove()
         {
-            App.Current.NoticeOverAllBase.MainPagesIndex = 0;
+            App.Current.ThisMainWindow.NavigateBack();
         }
 
-        //转换国际服及转换国服绑定命令
-        public ICommand GameFileConvertCommand { get; set; }
-        private async Task GameFileConvert()
+        // Accent color presets
+        public string[] AccentColors { get; } = new[]
         {
-            PageUiStatus = "false";
-            ProgressBar = "Visible";
-            FileHelper fileHelper = new();
-            if (!fileHelper.IsFileOpen(Path.Combine(App.Current.DataModel.GamePath, "Yuanshen.exe")) &&
-                !fileHelper.IsFileOpen(Path.Combine(App.Current.DataModel.GamePath, "GenshinImpact.exe")))
-            {
-                await GameConvert.ConvertGameFileAsync(this);
-                if (ConvertState)
-                {
-                    await dialogCoordinator.ShowMessageAsync(
-                    this, languages.TipsStr,
-                    App.Current.Language.SwitchSucessStr,
-                      MessageDialogStyle.Affirmative,
-                     new MetroDialogSettings()
-                     { AffirmativeButtonText = languages.Determine });
-                }
-                else
-                {
-                    await dialogCoordinator.ShowMessageAsync(
-                    this, languages.Error,
-                    App.Current.Language.ConvertError,
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
-                }
-            }
-            else
-            {
-                await dialogCoordinator.ShowMessageAsync(
-                    this, languages.Error,
-                    App.Current.Language.CloseGameWaring,
-                    MessageDialogStyle.Affirmative,
-                    new MetroDialogSettings()
-                    { AffirmativeButtonText = languages.Determine });
-            }
-            ProgressBar = "Hidden";
-            PageUiStatus = "true";
+            "#FF69B4", "#4B7BEC", "#A855F7", "#22C55E",
+            "#F59E0B", "#EF4444", "#06B6D4", "#F472B6"
+        };
+
+        private int _accentColorIndex;
+        public int AccentColorIndex { get => _accentColorIndex; set => SetProperty(ref _accentColorIndex, value); }
+
+        public ICommand SetAccentColorCommand { get; }
+
+        private int FindAccentColorIndex(string hex)
+        {
+            for (int i = 0; i < AccentColors.Length; i++)
+                if (string.Equals(AccentColors[i], hex, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            return 0;
+        }
+
+        private void SetAccentColor(string? hex)
+        {
+            if (string.IsNullOrEmpty(hex)) return;
+            App.Current.DataModel.AccentColor = hex;
+            AccentColorIndex = FindAccentColorIndex(hex);
+
+            var c = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+            var light = System.Windows.Media.Color.FromRgb(
+                (byte)Math.Min(255, c.R + 60),
+                (byte)Math.Min(255, c.G + 60),
+                (byte)Math.Min(255, c.B + 60));
+            var dark = System.Windows.Media.Color.FromRgb(
+                (byte)(c.R * 0.8),
+                (byte)(c.G * 0.8),
+                (byte)(c.B * 0.8));
+
+            Application.Current.Resources["AccentColor"] = c;
+            Application.Current.Resources["AccentLightColor"] = light;
+            Application.Current.Resources["AccentDarkColor"] = dark;
+            Application.Current.Resources["AccentBrush"] = new System.Windows.Media.SolidColorBrush(c);
+            Application.Current.Resources["AccentLightBrush"] = new System.Windows.Media.SolidColorBrush(light);
+            Application.Current.Resources["AccentDarkBrush"] = new System.Windows.Media.SolidColorBrush(dark);
         }
     }
 }

@@ -1,38 +1,41 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+﻿using System.Windows;
+using System.Windows.Input;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GenShin_Launcher_Plus.Models;
-using MahApps.Metro.Controls.Dialogs;
-using System.Windows.Input;
-
 using GenShin_Launcher_Plus.Service;
 using GenShin_Launcher_Plus.Service.IService;
 
 namespace GenShin_Launcher_Plus.ViewModels
 {
-    /// <summary>
-    /// 启动页的ViewModel
-    /// </summary>
     public class HomePageViewModel : ObservableObject
     {
-        private ILaunchService LaunchService { get; set; }
-        private IDialogCoordinator dialogCoordinator;
-        public HomePageViewModel(IDialogCoordinator instance)
+        private readonly ILaunchService _launchService;
+
+        public HomePageViewModel()
         {
-            LaunchService = new LaunchService(instance);
-            dialogCoordinator = instance;
-            RunGameCommand = new AsyncRelayCommand(LaunchService.RunGameAsync);
-            if (App.Current.DataModel.SwitchUser != null && App.Current.DataModel.SwitchUser != "")
+            _launchService = new LaunchService();
+            RunGameCommand = new AsyncRelayCommand(_launchService.RunGameAsync);
+            OpenSettingsCommand = new RelayCommand(OpenSettings);
+
+            if (!string.IsNullOrEmpty(App.Current.DataModel.SwitchUser))
             {
-                App.Current.NoticeOverAllBase.IsSwitchUser = "Visible";
+                App.Current.NoticeOverAllBase.IsSwitchUser = Visibility.Visible;
                 App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab} : {App.Current.DataModel.SwitchUser}";
             }
             else
             {
-                App.Current.NoticeOverAllBase.IsSwitchUser = "Hidden";
+                App.Current.NoticeOverAllBase.IsSwitchUser = Visibility.Collapsed;
             }
         }
-        public LanguageModel languages { get => App.Current.Language; }
 
-        public ICommand RunGameCommand { get; set; }
+        public LanguageModel languages => App.Current.Language;
+        public ICommand RunGameCommand { get; }
+        public ICommand OpenSettingsCommand { get; }
+
+        private void OpenSettings()
+        {
+            App.Current.ThisMainWindow.ViewModel.NavigateTo(new Views.SettingPage());
+        }
     }
 }

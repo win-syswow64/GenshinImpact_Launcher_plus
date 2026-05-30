@@ -1,76 +1,109 @@
-﻿using GenShin_Launcher_Plus.Helper;
-using GenShin_Launcher_Plus.ViewModels;
-using MahApps.Metro.Controls;
-using MahApps.Metro.Controls.Dialogs;
-using System;
+﻿using System;
 using System.Windows;
-using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using GenShin_Launcher_Plus.ViewModels;
 
 namespace GenShin_Launcher_Plus
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
-    public partial class MainWindow : MetroWindow
+    public partial class MainWindow : Window
     {
-        public MainWindowViewModel ViewModel;
+        public MainWindowViewModel ViewModel { get; }
+        private bool _sidebarExpanded;
+        private bool _navigatingBack;
+
         public MainWindow()
         {
             InitializeComponent();
             App.Current.ThisMainWindow = this;
-            ViewModel = new MainWindowViewModel(DialogCoordinator.Instance, this);
+            ViewModel = new MainWindowViewModel(this);
             DataContext = ViewModel;
-            MainSizeBinding();
-            MainFlipView.DataContext = App.Current.NoticeOverAllBase;
-            HomePage.Children.Add(new Views.HomePage());
+
+            // Default size = 50% of screen, unless config overrides
+            double cfgW = App.Current.DataModel.MainWidth;
+            double cfgH = App.Current.DataModel.MainHeight;
+            double screenW = SystemParameters.PrimaryScreenWidth;
+            double screenH = SystemParameters.PrimaryScreenHeight;
+            if (cfgW <= 0) cfgW = screenW * 0.5;
+            if (cfgH <= 0) cfgH = screenH * 0.5;
+            Width = cfgW;
+            Height = cfgH;
         }
 
         private void WindowDragMove(object sender, MouseButtonEventArgs e)
         {
-            DragMove();
+            if (e.ChangedButton == MouseButton.Left)
+                DragMove();
         }
 
-        private void SettingsPageButton_Click(object sender, RoutedEventArgs e)
+        private void ContentArea_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            SettingsPage.Children.Clear();
-            SettingsPage.Children.Add(new Views.SettingPage());
-            MainFlipView.SelectedIndex = 1;
-        }
-
-        private void AddUser_Click(object sender, RoutedEventArgs e)
-        {
-            AddUsersPage.Children.Clear();
-            AddUsersPage.Children.Add(new Views.UsersPage());
-            MainFlipView.SelectedIndex = 2;
-        }
-
-        private void Help_Click(object sender, RoutedEventArgs e)
-        {
-            FileHelper.OpenUrl("https://qm.qq.com/q/UZWuLb38om");
-        }
-
-        private void MainSizeBinding()
-        {
-            //Height
-            Binding mainHeight = new()
+            if (_sidebarExpanded && ViewModel.CurrentPage == null)
             {
-                Source = ViewModel,
-                Path = new PropertyPath("MainHeight"),
-                Mode = BindingMode.TwoWay,
-                UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged
-            };
-            SetBinding(HeightProperty, mainHeight);
+                ToggleSidebar(sender, e);
+                e.Handled = true;
+            }
+        }
 
-            //Width
-            Binding mainWidth = new()
+        public void NavigateBack()
+        {
+            if (ViewModel.CurrentPage == null || _navigatingBack) return;
+            _navigatingBack = true;
+
+            var duration = TimeSpan.FromMilliseconds(250);
+            var easing = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+
+            var translate = new TranslateTransform();
+            PageContent.RenderTransform = translate;
+            PageContent.RenderTransformOrigin = new Point(0.5, 0.5);
+
+            var pageFade = new DoubleAnimation(1, 0, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
+            var slideOut = new DoubleAnimation(0, 80, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
+            var overlayFade = new DoubleAnimation(1, 0, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
+
+            pageFade.Completed += (s, e) =>
             {
-                Source = ViewModel,
-                Path = new PropertyPath("MainWidth"),
-                Mode = BindingMode.TwoWay,
-                UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged
+                PageContent.Opacity = 1;
+                PageContent.RenderTransform = null;
+                PageOverlay.Opacity = 1;
+
+                ViewModel.NavigateTo(null);
+                ViewModel.RefreshNavVisibility();
+                _navigatingBack = false;
             };
-            SetBinding(WidthProperty, mainWidth);
+
+            PageContent.BeginAnimation(UIElement.OpacityProperty, pageFade);
+            translate.BeginAnimation(TranslateTransform.XProperty, slideOut);
+            PageOverlay.BeginAnimation(UIElement.OpacityProperty, overlayFade);
+        }
+
+        private void ToggleSidebar(object sender, RoutedEventArgs e)
+        {
+            _sidebarExpanded = !_sidebarExpanded;
+            double from = _sidebarExpanded ? 48 : 220;
+            double to = _sidebarExpanded ? 220 : 48;
+
+            var anim = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(200))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut }
+            };
+
+            if (_sidebarExpanded)
+            {
+                CollapsedPanel.Visibility = Visibility.Collapsed;
+                CollapsedBottom.Visibility = Visibility.Collapsed;
+                                ExpandedPanel.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ExpandedPanel.Visibility = Visibility.Collapsed;
+                CollapsedPanel.Visibility = Visibility.Visible;
+                CollapsedBottom.Visibility = Visibility.Visible;
+                                NavigateBack();
+            }
+
+            Sidebar.BeginAnimation(FrameworkElement.WidthProperty, anim);
         }
     }
 }

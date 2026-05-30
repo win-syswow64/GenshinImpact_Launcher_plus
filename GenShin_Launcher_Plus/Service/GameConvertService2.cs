@@ -1,580 +1,128 @@
-﻿using ControlzEx.Theming;
-using GenShin_Launcher_Plus.Core;
+﻿using GenShin_Launcher_Plus.Core;
 using GenShin_Launcher_Plus.Helper;
 using GenShin_Launcher_Plus.Models;
-using GenShin_Launcher_Plus.Service.IService;
-using GenShin_Launcher_Plus.ViewModels;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
-using System.Net.Http;
-using System.Text.Json;
-using System.Threading.Tasks;
 using System.Windows;
 
 namespace GenShin_Launcher_Plus.Service
 {
-    internal class ConvertService : IGameConvertService
+    /// <summary>
+    /// Manages the game''s Config.ini (cps, channel, sub_channel) and Bilibili SDK DLL.
+    /// Modeled after Starward: writes correct settings at launch time, no PKG-based conversion.
+    /// </summary>
+    internal class GameConfigService
     {
-        private const string CN_DIRECTORY = "CnFile";
-        private const string GLOBAL_DIRECTORY = "GlobalFile";
-        private const string YUANSHEN_DATA = "YuanShen_Data";
-        private const string GENSHINIMPACT_DATA = "GenshinImpact_Data";
-        private const string YUANSHEN_EXE = "YuanShen.exe";
-        private const string GENSHINIMPACT_EXE = "GenshinImpact.exe";
+        private readonly GameProfile _profile;
+        private readonly GameBiz _biz;
+        private readonly string _gamePath;
 
-        private string GamePath { get; set; }
-        private string Scheme { get; set; }
-        private string PkgPerfix { get; set; }
-        private string GameSource { get; set; }
-        private string GameDest { get; set; }
-        private string CurrentPath { get; set; }
-        private string ReplaceSourceDirectory { get; set; }
-        private string RestoreSourceDirectory { get; set; }
-        private List<string> GameFileList { get; set; }
-        public ConvertService()
+        public GameConfigService(GameProfile profile, GameBiz biz, string gamePath)
         {
-            GamePath = App.Current.DataModel.GamePath;
-            App.Current.DataModel.Cps = ConfigValue(GamePath, "cps");
-            CurrentPath = Environment.CurrentDirectory;
-        }
-
-        public string ConfigValue(string URL, string code)
-        {
-            string iniFilePath = Path.Combine(URL ?? "", "Config.ini");
-            if (!File.Exists(iniFilePath))
-            {
-                if (!Directory.Exists(@"Config"))
-                {
-                    Directory.CreateDirectory("Config");
-                }
-                return null;
-            }
-
-            try
-            {
-                using (StreamReader iniFile = new StreamReader(iniFilePath))
-                {
-                    string strLine;
-                    string currentRoot = null;
-
-                    while ((strLine = iniFile.ReadLine()) != null)
-                    {
-                        strLine = strLine.Trim();
-                        if (string.IsNullOrEmpty(strLine)) continue;
-
-                        if (strLine.StartsWith("[") && strLine.EndsWith("]"))
-                        {
-                            currentRoot = strLine.Substring(1, strLine.Length - 2);
-                        }
-                        else
-                        {
-                            string[] keyPair = strLine.Split(new char[] { '=' }, 2);
-                            if (keyPair.Length > 0 && keyPair[0] == code)
-                            {
-                                return keyPair.Length > 1 ? keyPair[1].Trim() : null;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // 可根据需求进行日志记录或其他处理
-                Console.WriteLine($"Error reading config file: {ex.Message}");
-            }
-
-            return null;
-        }
-
-        public async Task GetFilesNameFromJson(string jsonFilePath)
-        {
-            try
-            {
-                if (File.Exists(jsonFilePath))
-                {
-                    string json = await File.ReadAllTextAsync(jsonFilePath);
-                    List<string> gameFileList = JsonSerializer.Deserialize<List<string>>(json);
-
-                    foreach (string file in gameFileList)
-                    {
-                        // 处理文件路径
-                        string temp = file.Replace(Path.Combine(Environment.CurrentDirectory, ReplaceSourceDirectory), "");
-                        GameFileList.Add(temp);
-                    }
-
-                    // 删除 JSON 文件
-                    File.Delete(jsonFilePath);
-                }
-                else
-                {
-                    MessageBox.Show("GameFileList.json 文件不存在");
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message);
-            }
-        }
-
-        public void SetUI(int Is_Mihoyo)
-        {
-            switch (Is_Mihoyo)
-            {
-                case 0:
-                    App.Current.DataModel.Cps = "mihoyo";
-                    App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypePStr}";
-                    App.Current.NoticeOverAllBase.IsGamePortLists = "Visible";
-                    App.Current.NoticeOverAllBase.GamePortListIndex = 0;
-                    break;
-                case 1:
-                    App.Current.DataModel.Cps = "bilibili";
-                    App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypeBStr}";
-                    App.Current.NoticeOverAllBase.IsGamePortLists = "Visible";
-                    App.Current.NoticeOverAllBase.GamePortListIndex = 1;
-                    break;
-                case 2:
-                    App.Current.DataModel.Cps = "hoyoverse";
-                    App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypeMStr}";
-                    App.Current.NoticeOverAllBase.IsGamePortLists = "Hidden";
-                    App.Current.NoticeOverAllBase.GamePortListIndex = 2;
-                    break;
-                default:
-                    break;
-            }
+            _profile = profile;
+            _biz = biz;
+            _gamePath = gamePath;
         }
 
         /// <summary>
-        /// 获取所有文件加入到清单
+        /// Write the correct cps/channel/sub_channel to the game''s Config.ini
+        /// and manage the Bilibili SDK DLL based on the selected server.
+        /// Call this before launching the game.
         /// </summary>
-        /// <param name="directory"></param>
-        /// <returns></returns>
-        public async Task GetFilesName(string directory)
+        public void ApplyServerConfig()
         {
-            try
-            {
-                DirectoryInfo directoryInfo = new(directory);
-                FileInfo[] files = directoryInfo.GetFiles();
-                foreach (FileInfo file in files)
-                {
-                    string temp = file.FullName.Replace(Path.Combine(Environment.CurrentDirectory, ReplaceSourceDirectory), "");
-                    GameFileList.Add(temp);
-                }
-                DirectoryInfo[] dirs = directoryInfo.GetDirectories();
-                if (dirs.Length > 0)
-                {
-                    foreach (DirectoryInfo dir in dirs)
-                    {
-                        await GetFilesName(dir.FullName);
-                    }
-                }
+            string configPath = Path.Combine(_gamePath, "Config.ini");
+            if (!File.Exists(configPath)) return;
 
-                // 将 GameFileList 序列化为 JSON 并保存到 Config 文件夹中
-                string json = JsonSerializer.Serialize(GameFileList);
-                string configDirectory = Path.Combine(Environment.CurrentDirectory, "Config");
-                if (!Directory.Exists(configDirectory))
-                {
-                    Directory.CreateDirectory(configDirectory);
-                }
-                string filePath = Path.Combine(configDirectory, "GameFileList.json");
-                await File.WriteAllTextAsync(filePath, json);
-            }
-            catch (Exception ex)
+            string cps;
+            int channel;
+            int subChannel;
+
+            if (_biz.IsBilibili())
             {
-                MessageBox.Show(ex.Message);
+                cps = "bilibili";
+                channel = 14;
+                subChannel = 0;
             }
+            else if (_biz.IsGlobalServer())
+            {
+                cps = "hoyoverse";
+                channel = 1;
+                subChannel = 0;
+            }
+            else // CN
+            {
+                cps = "mihoyo";
+                channel = 1;
+                subChannel = 1;
+            }
+
+            // Write to Config.ini via IniParser
+            var gp = new IniParser(configPath);
+            gp.AddSetting("General", "cps", cps);
+            gp.AddSetting("General", "channel", Convert.ToString(channel));
+            gp.AddSetting("General", "sub_channel", Convert.ToString(subChannel));
+            gp.SaveSettings();
+
+            // Manage Bilibili SDK DLL
+            ManageBilibiliSdk();
+
+            Logger.Info($"Applied server config: {_biz} -> cps={cps}, channel={channel}, sub_channel={subChannel}", "Config");
         }
 
         /// <summary>
-        /// 获取当前需要的Pkg前缀
+        /// Ensure the Bilibili SDK DLL exists only for Bilibili server, removed for others.
         /// </summary>
-        /// <returns></returns>
-        public string GetCurrentSchemeName()
+        private void ManageBilibiliSdk()
         {
-            if (File.Exists(Path.Combine(GamePath, YUANSHEN_EXE)))
+            if (_profile?.BilibiliSdkPath == null) return;
+
+            string dataFolder = _profile.GetDataFolder(_biz);
+            string sdkPath = Path.Combine(_gamePath, dataFolder, _profile.BilibiliSdkPath);
+
+            if (_biz.IsBilibili())
             {
-                return CN_DIRECTORY;
-            }
-            else if (File.Exists(Path.Combine(GamePath, GENSHINIMPACT_EXE)))
-            {
-                return GLOBAL_DIRECTORY;
+                // Ensure SDK exists
+                if (!File.Exists(sdkPath))
+                {
+                    try
+                    {
+                        FileHelper.ExtractEmbededAppResource("StaticRes/mihoyosdk.dll", sdkPath);
+                        Logger.Info($"Extracted Bilibili SDK to {sdkPath}", "Config");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error($"Failed to extract Bilibili SDK: {ex.Message}", "Config");
+                    }
+                }
             }
             else
             {
-                return string.Empty;
-            }
-        }
-
-        /// <summary>
-        /// 检查Pkg版本
-        /// </summary>
-        /// <param name="scheme"></param>
-        /// <param name="vm"></param>
-        /// <returns></returns>
-        /// <exception cref="NotImplementedException"></exception>
-        /// 
-        public async Task<bool> CheckPackageVersionAsync(string scheme, SettingsPageViewModel vm)
-        {
-            int flag = 0;
-            while (string.IsNullOrEmpty(App.Current.PkgUpdataModel?.PkgVersion))
-            {
-                flag++;
-                if (App.Current?.PkgUpdataModel != null)
-                {
-                    App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
-                }
-                else
-                {
-                    // 初始化 PkgUpdataModel 或处理 null 情况
-                    App.Current.PkgUpdataModel = new PkgUpdataModel();
-                    App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
-                }
-
-                if (!string.IsNullOrEmpty(App.Current.PkgUpdataModel.PkgVersion))
-                {
-                    break;
-                }
-                if (flag >= 10)
-                {
-                    vm.ConvertingLog = $"获取PKG版本号失败，请检查你的网络设置。";
-                    return false;
-                }
-
-                vm.ConvertingLog = $"获取PKG版本号失败，尝试重新获取{flag}";
-                await Task.Delay(1000);
-            }
-
-            string gameversion = ConfigValue(GamePath, "game_version");
-            string pkgversion = ConfigValue(scheme, "game_version");
-
-            if (gameversion != App.Current.PkgUpdataModel.PkgVersion)
-            {
-                vm.ConvertingLog = $"当前游戏版本过低，请前往米哈游启动器更新游戏。\r\n当前游戏版本号：{gameversion}\r\n当前从API获取的游戏版本号：{App.Current.PkgUpdataModel.PkgVersion}\r\n";
-                return false;
-            }
-
-            if (pkgversion != App.Current.PkgUpdataModel.PkgVersion)
-            {
-                vm.ConvertingLog = $"{App.Current.Language.NewPkgVer} : [{pkgversion}]\r\n即将下载最新版本转换包。\r\n请将下载好的转换包移动至本软件软件目录下。";
-                await Task.Delay(1000);
-
-                if (scheme == CN_DIRECTORY)
-                {
-                    ProcessStartInfo info = new()
-                    {
-                        FileName = "https://download.xingdream.top/now/GenshinImpact/CnFile.pkg",
-                        UseShellExecute = true,
-                    };
-                    Process.Start(info);
-                }
-                else
-                {
-                    ProcessStartInfo info = new()
-                    {
-                        FileName = "https://download.xingdream.top/now/GenshinImpact/GlobalFile.pkg",
-                        UseShellExecute = true,
-                    };
-                    Process.Start(info);
-                }
-                return false;
-            }
-            return true;
-        }
-
-        /// <summary>
-        /// 异步转换游戏任务
-        /// </summary>
-        /// <param name="vm"></param>
-        /// <returns></returns>
-        /// <exception cref="NotImplementedException"></exception>
-        public async Task ConvertGameFileAsync(SettingsPageViewModel vm)
-        {
-            GameFileList = new List<string>();
-            Scheme = GetCurrentSchemeName();
-            PkgPerfix = Scheme == CN_DIRECTORY ? GLOBAL_DIRECTORY : CN_DIRECTORY;
-            GameSource = Scheme == CN_DIRECTORY ? YUANSHEN_DATA : GENSHINIMPACT_DATA;
-            GameDest = Scheme == CN_DIRECTORY ? GENSHINIMPACT_DATA : YUANSHEN_DATA;
-            ReplaceSourceDirectory = Scheme == CN_DIRECTORY ? GLOBAL_DIRECTORY : CN_DIRECTORY;
-            RestoreSourceDirectory = Scheme == CN_DIRECTORY ? CN_DIRECTORY : GLOBAL_DIRECTORY;
-
-            await Task.Run(async () =>
-            {
-
-                if (File.Exists(Path.Combine(GamePath, $"{YUANSHEN_EXE}.bak")) ||
-                File.Exists(Path.Combine(GamePath, $"{GENSHINIMPACT_EXE}.bak")))
-                {
-                    //直接从 bak 还原
-                    vm.StateIndicator = "正在获取备份清单";
-                    string jsonFilePath = Path.Combine(CurrentPath, "Config", "GameFileList.json");
-                    if (File.Exists(jsonFilePath))
-                    {
-                        await GetFilesNameFromJson(jsonFilePath);
-                        vm.ConvertingLog += $"正在还原客户端\r\n";
-                        await RestoreGameFiles(vm);
-                    }
-                    else
-                    {
-                        vm.ConvertingLog += $"转换Pkg副本已丢失，无法还原\r\n";
-                        vm.ConvertState = false;
-                    }
-                }
-                else if (Directory.Exists(Path.Combine(CurrentPath, PkgPerfix)))
-                {
-                    //直接从 pkg解压后的目录 处替换
-                    bool up = await CheckPackageVersionAsync(ReplaceSourceDirectory, vm);
-                    if (!up)
-                    {
-                        Directory.Delete($"{CurrentPath}/{ReplaceSourceDirectory}", true);
-                        vm.ConvertState = false;
-                        return;
-                    }
-                    vm.StateIndicator = "正在获取文件清单";
-                    await GetFilesName(Path.Combine(CurrentPath, ReplaceSourceDirectory));
-                    await ReplaceGameFiles(vm);
-                }
-                else if (File.Exists(Path.Combine(CurrentPath, $"{PkgPerfix}.pkg")))
-                {
-                    vm.StateIndicator = "开始解压Pkg文件";
-                    //解压 pkg 文件
-                    if (Decompress(PkgPerfix))
-                    {
-                        bool up = await CheckPackageVersionAsync(ReplaceSourceDirectory, vm);
-                        if (!up)
-                        {
-                            vm.ConvertState = false;
-                            Directory.Delete($"{CurrentPath}/{ReplaceSourceDirectory}", true);
-                            return;
-                        }
-                        //直接从 pkg解压后的目录 处替换
-                        vm.StateIndicator = "正在获取文件清单";
-                        await GetFilesName(Path.Combine(CurrentPath, ReplaceSourceDirectory));
-                        await ReplaceGameFiles(vm);
-                    }
-                    else
-                    {
-                        vm.ConvertingLog += $"{PkgPerfix}.pkg 文件解压失败\r\n";
-                        vm.ConvertState = false;
-                    }
-                }
-                else
-                {
-                    vm.ConvertingLog += $"{PkgPerfix}.pkg 文件不存在\r\n";
-                    vm.ConvertState = false;
-                }
-                vm.StateIndicator = "无状态";
-            });
-        }
-
-        /// <summary>
-        /// 替换游戏文件逻辑
-        /// </summary>
-        /// <param name="vm"></param>
-        /// <returns></returns>
-        public async Task ReplaceGameFiles(SettingsPageViewModel vm)
-        {
-
-            vm.ConvertingLog += "开始备份文件\r\n";
-            await BackupGameFile(vm);
-            vm.ConvertingLog += $"原目录：{Path.Combine(GamePath, GameSource)}\r\n";
-            vm.ConvertingLog += $"新目录：{Path.Combine(GamePath, GameDest)}\r\n";
-            Directory.Move(Path.Combine(GamePath, GameSource), Path.Combine(GamePath, GameDest));
-            // 备份完毕开始替换
-            vm.StateIndicator = "开始替换客户端";
-            vm.ConvertingLog += "释放Pkg文件至游戏目录\r\n";
-            foreach (string file in GameFileList)
-            {
-                string temp = file.Replace(@$"\{GameDest}", GameDest);
-                string gameFilePath = temp.Insert(0, $@"{GamePath}\");
-                string pkgFilePath = temp.Insert(0, $@"{Path.Combine(Environment.CurrentDirectory, ReplaceSourceDirectory)}\");
-                if (File.Exists(pkgFilePath))
+                // Remove SDK if present
+                if (File.Exists(sdkPath))
                 {
                     try
                     {
-                        File.Copy(pkgFilePath, gameFilePath, true);
-                        vm.ConvertingLog += $"{pkgFilePath} 替换成功\r\n";
+                        File.Delete(sdkPath);
+                        Logger.Info($"Removed Bilibili SDK from {sdkPath}", "Config");
                     }
                     catch (Exception ex)
                     {
-                        vm.ConvertingLog += $"警告：{ex.Message} \r\n";
+                        Logger.Warn($"Failed to remove Bilibili SDK: {ex.Message}", "Config");
                     }
-
-                }
-                else
-                {
-                    vm.ConvertingLog += $"{gameFilePath}替换失败，文件有所缺失\r\n";
                 }
             }
-
-            string cps = Scheme == CN_DIRECTORY ? "mihoyo" : "hoyoverse";
-            vm.IsMihoyo = cps == "hoyoverse" ? 0 : 2;
-            SetUI(vm.IsMihoyo);
-            vm.ConvertingLog += $"所有文件替换完成，尽情享受吧...\r\n";
-            vm.ConvertState = true;
-        }
-
-
-        /// <summary>
-        /// 还原游戏文件
-        /// </summary>
-        /// <param name="vm"></param>
-        /// <returns></returns>
-        public async Task RestoreGameFiles(SettingsPageViewModel vm)
-        {
-            vm.StateIndicator = "开始还原文件";
-
-            vm.ConvertingLog += "开始还原文件\r\n";
-            foreach (string file in GameFileList)
-            {
-                string temp = file.Replace(Path.Combine(CurrentPath, RestoreSourceDirectory), "");
-                string filePath = temp.Insert(0, $@"{GamePath}");
-                if (File.Exists(filePath))
-                {
-                    try
-                    {
-                        File.Delete(filePath);
-                        File.Move($@"{filePath}.bak", filePath);
-                        vm.ConvertingLog += $"{filePath} 还原成功\r\n";
-                    }
-                    catch (Exception e)
-                    {
-                        vm.ConvertingLog += $"警告：{e.Message} \r\n";
-                    }
-                }
-                else
-                {
-                    vm.ConvertingLog += $"{filePath}还原失败，文件不存在\r\n";
-                }
-            }
-            string gameExecute = Scheme == GLOBAL_DIRECTORY ? YUANSHEN_EXE : GENSHINIMPACT_EXE;
-            vm.ConvertingLog += $"新游戏本体路径:{Path.Combine(GamePath, $"{gameExecute}")} \r\n";
-            File.Move(Path.Combine(GamePath, $"{gameExecute}.bak"), Path.Combine(GamePath, gameExecute));
-            Directory.Move(Path.Combine(GamePath, GameSource), Path.Combine(GamePath, GameDest));
-
-            string cps = Scheme == CN_DIRECTORY ? "mihoyo" : "hoyoverse";
-            vm.IsMihoyo = cps == "hoyoverse" ? 0 : 2;
-            SetUI(vm.IsMihoyo);
-            vm.ConvertingLog += $"所有文件还原完成，尽情享受吧...\r\n";
-            vm.ConvertState = true;
         }
 
         /// <summary>
-        /// 备份原来的游戏文件
+        /// Read the current cps value from Config.ini.
         /// </summary>
-        /// <returns></returns>
-        public async Task BackupGameFile(SettingsPageViewModel vm)
+        public static string ReadCps(string gamePath)
         {
-            vm.StateIndicator = "开始备份文件";
-
-            foreach (string file in GameFileList)
-            {
-                string temp = file.Replace(@$"\{GameDest}", GameSource);
-                string filePath = temp.Insert(0, $@"{GamePath}\");
-                if (File.Exists(filePath))
-                {
-                    try
-                    {
-                        File.Move(filePath, $@"{filePath}.bak");
-                        vm.ConvertingLog += $"{filePath} 备份成功\r\n";
-                    }
-                    catch (Exception ex)
-                    {
-                        vm.ConvertingLog += $"警告：{ex.Message} \r\n";
-                    }
-
-                }
-                else
-                {
-                    vm.ConvertingLog += $"{filePath}备份失败，文件不存在\r\n";
-                }
-            }
-            string gameExecute = Scheme == GLOBAL_DIRECTORY ? GENSHINIMPACT_EXE : YUANSHEN_EXE;
-            vm.ConvertingLog += $"游戏本体exe:{gameExecute} \r\n";
-            vm.ConvertingLog += $"原游戏本体路径:{Path.Combine(GamePath, gameExecute)} \r\n";
-            vm.ConvertingLog += $"新游戏本体路径:{Path.Combine(GamePath, $"{gameExecute}.bak")} \r\n";
-            File.Move(Path.Combine(GamePath, gameExecute), Path.Combine(GamePath, $"{gameExecute}.bak"));
-
-        }
-
-
-
-        /// <summary>
-        /// 解压Pkg文件
-        /// </summary>
-        /// <param name="archiveName"></param>
-        /// <returns></returns>
-        private bool Decompress(string archiveName)
-        {
-            try
-            {
-                ZipFile.ExtractToDirectory($"{CurrentPath}/{archiveName}.pkg", CurrentPath, true);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-
-        /// <summary>
-        /// 保存游戏设置
-        /// </summary>
-        /// <param name="vm"></param>
-        /// <exception cref="NotImplementedException"></exception>
-        public void SaveGameConfig(SettingsPageViewModel vm)
-        {
-            if (File.Exists(Path.Combine(App.Current.DataModel.GamePath, "config.ini")))
-            {
-                string bilibilisdk = "Plugins/PCGameSDK.dll";
-                switch (vm.IsMihoyo)
-                {
-                    case 0:
-                        App.Current.DataModel.Cps = "mihoyo";
-                        App.Current.DataModel.Channel = 1;
-                        App.Current.DataModel.Sub_channel = 1;
-                        if (File.Exists(Path.Combine(GamePath, $"YuanShen_Data/{bilibilisdk}")))
-                            File.Delete(Path.Combine(GamePath, $"YuanShen_Data/{bilibilisdk}"));
-                        App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypePStr}";
-                        App.Current.NoticeOverAllBase.IsGamePortLists = "Visible";
-                        App.Current.NoticeOverAllBase.GamePortListIndex = 0;
-                        break;
-                    case 1:
-                        App.Current.DataModel.Cps = "bilibili";
-                        App.Current.DataModel.Channel = 14;
-                        App.Current.DataModel.Sub_channel = 0;
-                        if (!File.Exists(Path.Combine(GamePath, $"YuanShen_Data/{bilibilisdk}")))
-                        {
-                            try
-                            {
-                                string sdkPath = Path.Combine(GamePath, $"YuanShen_Data/{bilibilisdk}");
-                                FileHelper.ExtractEmbededAppResource("StaticRes/mihoyosdk.dll", sdkPath);
-                            }
-                            catch (Exception ex)
-                            {
-                                MessageBox.Show(ex.Message);
-                            }
-                        }
-                        App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypeBStr}";
-                        App.Current.NoticeOverAllBase.IsGamePortLists = "Visible";
-                        App.Current.NoticeOverAllBase.GamePortListIndex = 1;
-
-                        break;
-                    case 2:
-                        App.Current.DataModel.Cps = "hoyoverse";
-                        App.Current.DataModel.Channel = 1;
-                        App.Current.DataModel.Sub_channel = 0;
-                        if (File.Exists(Path.Combine(GamePath, $"GenshinImpact_Data/{bilibilisdk}")))
-                            File.Delete(Path.Combine(GamePath, $"GenshinImpact_Data/{bilibilisdk}"));
-                        App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypeMStr}";
-                        App.Current.NoticeOverAllBase.IsGamePortLists = "Hidden";
-                        App.Current.NoticeOverAllBase.GamePortListIndex = 2;
-                        break;
-                    default:
-                        break;
-                }
-            }
+            string configPath = Path.Combine(gamePath, "Config.ini");
+            if (!File.Exists(configPath)) return null;
+            var gp = new IniParser(configPath);
+            return gp.GetSetting("General", "cps", 0);
         }
     }
 }

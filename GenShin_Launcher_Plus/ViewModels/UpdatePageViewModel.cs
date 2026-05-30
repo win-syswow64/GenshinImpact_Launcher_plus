@@ -1,69 +1,45 @@
-﻿using MahApps.Metro.Controls.Dialogs;
+﻿using System.Windows;
+using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using System.Windows.Input;
-using GenShin_Launcher_Plus.Models;
-using GenShin_Launcher_Plus.Service.IService;
-using GenShin_Launcher_Plus.Service;
 using GenShin_Launcher_Plus.Helper;
+using GenShin_Launcher_Plus.Models;
+using GenShin_Launcher_Plus.Service;
+using GenShin_Launcher_Plus.Service.IService;
 
 namespace GenShin_Launcher_Plus.ViewModels
 {
-    /// <summary>
-    /// 更新页面的ViewModel 
-    /// 集成了更新页面的UI更新绑定
-    /// </summary>
     public class UpdatePageViewModel : ObservableObject
     {
-        public IDialogCoordinator dialogCoordinator;
-        public UpdatePageViewModel(IDialogCoordinator instance)
+        private readonly IUpdateService _updateService;
+
+        public UpdatePageViewModel()
         {
-            DFC = new();
-            dialogCoordinator = instance;
-            UpadteService = new UpdateService();
+            DFC = new DownloadHelper();
+            _updateService = new UpdateService();
             UpdateRunCommand = new RelayCommand(RunUpdate);
-            ViewControlVisibility = "Hidden";
+            ViewControlVisibility = Visibility.Collapsed;
         }
 
-        private IUpdateService UpadteService { get; set; }
+        public DownloadHelper DFC { get; }
+        public LanguageModel languages => App.Current.Language;
+        public string Notify => App.Current.UpdateObject?.Content ?? string.Empty;
+        public string Title => App.Current.UpdateObject?.Title ?? string.Empty;
 
+        private bool _buttonIsEnabled = true;
+        public bool ButtonIsEnabled { get => _buttonIsEnabled; set => SetProperty(ref _buttonIsEnabled, value); }
 
-        private DownloadHelper _DFC;
-        public DownloadHelper DFC { get => _DFC; set => SetProperty(ref _DFC, value); }
+        private Visibility _viewControlVisibility;
+        public Visibility ViewControlVisibility { get => _viewControlVisibility; set => SetProperty(ref _viewControlVisibility, value); }
 
+        private bool _useGlobalUrlCheck;
+        public bool UseGlobalUrlCheck { get => _useGlobalUrlCheck; set => SetProperty(ref _useGlobalUrlCheck, value); }
 
-        public LanguageModel languages { get => App.Current.Language; }
-        public string Notify
+        public ICommand UpdateRunCommand { get; }
+
+        private void RunUpdate()
         {
-            get => App.Current.UpdateObject.Content;
+            _updateService.UpdateRun(this);
         }
-        public string Title
-        {
-            get => App.Current.UpdateObject.Title;
-        }
-
-        private bool _ButtonIsEnabled = true;
-        public bool ButtonIsEnabled
-        {
-            get => _ButtonIsEnabled;
-            set => SetProperty(ref _ButtonIsEnabled, value);
-        }
-
-        private string _ViewControlVisibility;
-        public string ViewControlVisibility
-        {
-            get => _ViewControlVisibility;
-            set => SetProperty(ref _ViewControlVisibility, value);
-        }
-
-        private bool _UseGlobalUrlCheck;
-        public bool UseGlobalUrlCheck
-        {
-            get => _UseGlobalUrlCheck;
-            set => SetProperty(ref _UseGlobalUrlCheck, value);
-        }
-
-        public ICommand UpdateRunCommand { get; set; }
-        private void RunUpdate() { UpadteService.UpdateRun(this); }
     }
 }

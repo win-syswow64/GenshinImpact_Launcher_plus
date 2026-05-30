@@ -26,4 +26,13 @@
         public string LangName { get; set; }
         public string LangFileName { get; set; }
     }
+    public class ConvertTargetListModel
+    {
+        public string TargetName { get; set; }
+        public string TargetKey { get; set; }
+        public string CurrentScheme { get; set; }
+        public string DataFolder { get; set; }
+        public string ExeName { get; set; }
+        public bool IsSupported { get; set; }
+    }
 }

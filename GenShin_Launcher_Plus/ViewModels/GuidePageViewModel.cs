@@ -1,58 +1,53 @@
-﻿using GenShin_Launcher_Plus.Models;
-using CommunityToolkit.Mvvm.ComponentModel;
-using System.Windows.Input;
-using Microsoft.WindowsAPICodePack.Dialogs;
-using System.IO;
+﻿using System.IO;
 using System.Windows;
-using MahApps.Metro.Controls.Dialogs;
+using System.Windows.Input;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GenShin_Launcher_Plus.Core;
+using GenShin_Launcher_Plus.Models;
+using GenShin_Launcher_Plus.Service;
+using GenShin_Launcher_Plus.Service.IService;
+using GenShin_Launcher_Plus.Helper;
 
 namespace GenShin_Launcher_Plus.ViewModels
 {
     public class GuidePageViewModel : ObservableObject
     {
-        private IDialogCoordinator dialogCoordinator;
-        public GuidePageViewModel(IDialogCoordinator instance)
+        public GuidePageViewModel()
         {
-            dialogCoordinator = instance;
             DirchooseCommand = new RelayCommand(Dirchoose);
         }
-        private string _GamePath;
-        public string GamePath
-        {
-            get=> _GamePath;
-            set=> SetProperty(ref _GamePath, value);
-        }
 
-        public LanguageModel languages { get => App.Current.Language; }
+        private string _gamePath = string.Empty;
+        public string GamePath { get => _gamePath; set => SetProperty(ref _gamePath, value); }
 
-        /// <summary>
-        /// 选择游戏目录的命令方法
-        /// </summary>
-        public ICommand DirchooseCommand { get; set; }
+        public LanguageModel languages => App.Current.Language;
+
+        public ICommand DirchooseCommand { get; }
+
         private void Dirchoose()
         {
-            CommonOpenFileDialog dialog = new(App.Current.Language.GameDirMsg);
-            dialog.IsFolderPicker = true;
-            if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
+            var dialog = new System.Windows.Forms.FolderBrowserDialog
             {
-                GamePath = dialog.FileName;
-                if (!File.Exists(Path.Combine(GamePath, "Yuanshen.exe")) && 
-                    !File.Exists(Path.Combine(GamePath, "GenshinImpact.exe")))
+                Description = App.Current.Language.GameDirMsg,
+                ShowNewFolderButton = false
+            };
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                GamePath = dialog.SelectedPath;
+                var game = App.Current.DataModel.ActiveGame;
+                if (game == null) return;
+                if (!File.Exists(Path.Combine(GamePath, game.CnExeName)) &&
+                    !File.Exists(Path.Combine(GamePath, game.GlobalExeName)))
                 {
-                    dialogCoordinator.ShowMessageAsync(
-                        this, languages.Error, 
-                        languages.PathErrorMessageStr, 
-                        MessageDialogStyle.Affirmative,
-                        new MetroDialogSettings()
-                        { AffirmativeButtonText = languages.Determine });
+                    DialogHelper.ShowWarning(languages.PathErrorMessageStr, languages.Error);
                 }
                 else
                 {
                     App.Current.DataModel.GamePath = GamePath;
                     App.Current.DataModel.SaveDataToFile();
-                    App.Current.DataModel = new();
-                    MainWindow mainWindow = new();
+                    App.Current.DataModel = new DataModel();
+                    var mainWindow = new MainWindow();
                     mainWindow.Show();
                     Application.Current.MainWindow.Close();
                     Application.Current.MainWindow = mainWindow;

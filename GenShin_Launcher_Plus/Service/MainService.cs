@@ -1,183 +1,145 @@
 ﻿using System;
 using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Threading.Tasks;
-using System.Windows.Media.Media3D;
-using GenShin_Launcher_Plus.Core;
+using GenShin_Launcher_Plus.Helper;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service.IService;
 using GenShin_Launcher_Plus.ViewModels;
-using MahApps.Metro.Controls.Dialogs;
 using Newtonsoft.Json;
 
 namespace GenShin_Launcher_Plus.Service
 {
-
     public class MainService : IMainWindowService
     {
         public MainService(MainWindow main, MainWindowViewModel vm)
         {
             CheckConfig(main);
-            MainBackgroundLoad(vm);
+            _ = MainBackgroundLoadAsync(vm);
         }
 
-        /// <summary>
-        /// 异步实现Main中的通知
-        /// </summary>
         public async Task CheckNotice()
         {
+            Logger.Debug("Checking for notices", "Main");
             string json = await HtmlHelper.GetInfoFromHtmlAsync("Notice");
             App.Current.NoticeObject = JsonConvert.DeserializeObject<NoticeModel>(json) ?? new();
         }
 
-        /// <summary>
-        /// 异步实现Main中的背景调用
-        /// </summary>
-        /// <param name="vm"></param>
-        public async void MainBackgroundLoad(MainWindowViewModel vm)
+        public async Task MainBackgroundLoadAsync(MainWindowViewModel vm)
         {
             App.Current.IsLoadingBackground = true;
-            vm.Background = new ImageBrush();
-            if (App.Current.DataModel.UseXunkongWallpaper)
+            Logger.Debug("Loading background", "Main");
+            var bg = new ImageBrush { Stretch = Stretch.UniformToFill };
+            var defaultUri = new Uri("pack://application:,,,/Images/MainBackground.jpg", UriKind.Absolute);
+
+            var bgPath = App.Current.DataModel.BackgroundPath;
+            if (!string.IsNullOrEmpty(bgPath) && File.Exists(bgPath))
             {
-                vm.Background.Stretch = Stretch.UniformToFill;
-                var uri = new Uri("pack://application:,,,/Images/MainBackground.jpg", UriKind.Absolute);
-                var file = Path.Combine(AppContext.BaseDirectory, "Config/Wallpaper.jpg");
-                if (File.Exists(file))
+                // Custom background from local file
+                using var fs = File.OpenRead(bgPath);
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.StreamSource = fs;
+                bitmap.EndInit();
+                bg.ImageSource = bitmap;
+            }
+            else if (App.Current.DataModel.UseXunkongWallpaper)
+            {
+                // Daily image toggle ON: load from API (with local cache)
+                bg.ImageSource = new BitmapImage(defaultUri);
+                try
                 {
-                    uri = new Uri(file);
-                    using var fs = File.OpenRead(file);
-                    var bitmap = new BitmapImage();
-                    bitmap.BeginInit();
-                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                    bitmap.StreamSource = fs;
-                    bitmap.EndInit();
-                    vm.Background.ImageSource = bitmap;
+                    App.Current.BackgroundModel ??= new BackgroundModel();
+                    string directUrl = await HtmlHelper.GetDailyImageDirectUrlAsync();
+                    if (!string.IsNullOrEmpty(directUrl))
+                    {
+                        App.Current.BackgroundModel.BackgroundUrl = directUrl;
+
+                        using var client = new HttpClient(new HttpClientHandler
+                        {
+                            AutomaticDecompression = DecompressionMethods.All
+                        });
+                        client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+                        var bytes = await client.GetByteArrayAsync(directUrl);
+
+                        var configDir = Path.Combine(AppContext.BaseDirectory, "Config");
+                        if (!Directory.Exists(configDir))
+                            Directory.CreateDirectory(configDir);
+                        var wallpaperPath = Path.Combine(configDir, "Wallpaper.jpg");
+                        File.WriteAllBytes(wallpaperPath, bytes);
+
+                        var ms = new MemoryStream(bytes);
+                        var newBitmap = new BitmapImage();
+                        newBitmap.BeginInit();
+                        newBitmap.CacheOption = BitmapCacheOption.OnLoad;
+                        newBitmap.StreamSource = ms;
+                        newBitmap.EndInit();
+                        bg.ImageSource = newBitmap;
+                    }
                 }
-                else
+                catch
                 {
-                    vm.Background.ImageSource = new BitmapImage(uri);
+                    bg.ImageSource = new BitmapImage(defaultUri);
                 }
-
-                //string imageJson = await HtmlHelper.GetInfoFromHtmlAsync("Image");
-                //DailyImageModel dailyImage = JsonConvert.DeserializeObject<DailyImageModel>(imageJson);
-                //if (dailyImage == null)
-                //{
-                //    MessageBox.Show("DailyImage Json returns error: object is null");
-                //    App.Current.IsLoadingBackground = false;
-                //    return;
-                //}
-
-                //int year = DateTime.Now.Year;
-                //int month = DateTime.Now.Month;
-                //int day = DateTime.Now.Day;
-                //string imageDate = $"{year}{month}{day}";
-                //int count = dailyImage.ImageInfo.FindIndex(t => t.ImageDate == imageDate);
-                //if (count == -1) count = 0;
-                //if (dailyImage.ImageInfo[count].ImageDate != App.Current.DataModel.ImageDate || !File.Exists(file))
-                //{
-                //    try
-                //    {
-                //        string url = $"https://pixiv.re/{dailyImage.ImageInfo[count].ImagePid}.jpg";
-                //        var client = new HttpClient(new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
-                //        var bytes = await client.GetByteArrayAsync(url);
-                //        var ms = new MemoryStream(bytes);
-                //        var newBitmap = new BitmapImage();
-                //        newBitmap.BeginInit();
-                //        newBitmap.CacheOption = BitmapCacheOption.OnLoad;
-                //        newBitmap.StreamSource = ms;
-                //        newBitmap.EndInit();
-                //        vm.Background.ImageSource = newBitmap;
-                //        await File.WriteAllBytesAsync(file, bytes);
-                //        App.Current.DataModel.ImageDate = dailyImage.ImageInfo[count].ImageDate;
-                //    }
-                //    catch (Exception ex)
-                //    {
-                //        App.Current.IsLoadingBackground = false;
-                //        MessageBox.Show($"PID:{dailyImage.ImageInfo[count].ImagePid}\r\n{ex.Message}");
-                //    }
-                //}
             }
             else
             {
-                Uri uri = new("pack://application:,,,/Images/MainBackground.jpg", UriKind.Absolute);
-                if (!App.Current.DataModel.IsWebBg)
+                // Daily image toggle OFF: load MiHoYo background
+                bg.ImageSource = new BitmapImage(defaultUri);
+                try
                 {
-                    vm.Background.ImageSource = new BitmapImage(uri);
-                    if (App.Current?.BackgroundModel != null)
+                    App.Current.BackgroundModel ??= new BackgroundModel();
+                    App.Current.BackgroundModel.BackgroundUrl = await HtmlHelper.GetBackgroundImageUrlAsync();
+                    string bgUrl = App.Current.BackgroundModel.BackgroundUrl;
+                    if (!string.IsNullOrEmpty(bgUrl) && bgUrl != "null")
                     {
-                        App.Current.BackgroundModel.BackgroundUrl = await HtmlHelper.GetBackgroundImageUrlAsync();
-                    }
-                    else
-                    {
-                        // 初始化 PkgUpdataModel 或处理 null 情况
-                        App.Current.BackgroundModel = new BackgroundModel();
-                        App.Current.BackgroundModel.BackgroundUrl = await HtmlHelper.GetBackgroundImageUrlAsync();
-                    }
-                    string bgurl = App.Current.BackgroundModel.BackgroundUrl;
-                    var client = new HttpClient(new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
-                    if (bgurl != null & bgurl != "null" && bgurl != string.Empty)
-                    {
-                        try
+                        using var client = new HttpClient(new HttpClientHandler
                         {
-                            var bytes = await client.GetByteArrayAsync(bgurl);
-                            var ms = new MemoryStream(bytes);
-                            var newBitmap = new BitmapImage();
-                            newBitmap.BeginInit();
-                            newBitmap.CacheOption = BitmapCacheOption.OnLoad;
-                            newBitmap.StreamSource = ms;
-                            newBitmap.EndInit();
-                            vm.Background.ImageSource = newBitmap;
-                            vm.Background.Stretch = Stretch.UniformToFill;
-                        }
-                        catch (Exception e)
-                        {
-                            MessageBox.Show($"下载图片失败!");
-                            vm.Background.ImageSource = new BitmapImage(uri);
-                            vm.Background.Stretch = Stretch.UniformToFill;
-                            Console.WriteLine($"Request error: {e.Message}");
-                        }
+                            AutomaticDecompression = DecompressionMethods.All
+                        });
+                        var bytes = await client.GetByteArrayAsync(bgUrl);
+                        var ms = new MemoryStream(bytes);
+                        var newBitmap = new BitmapImage();
+                        newBitmap.BeginInit();
+                        newBitmap.CacheOption = BitmapCacheOption.OnLoad;
+                        newBitmap.StreamSource = ms;
+                        newBitmap.EndInit();
+                        bg.ImageSource = newBitmap;
                     }
-                    App.Current.IsLoadingBackground = false;
-                    return;
                 }
-
-                vm.Background.ImageSource = new BitmapImage(uri);
-                vm.Background.Stretch = Stretch.UniformToFill;
-
-                var bg = App.Current.DataModel.BackgroundPath;
-                if (File.Exists(bg))
+                catch
                 {
-                    using var fs = File.OpenRead(bg);
-                    var bitmap = new BitmapImage();
-                    bitmap.BeginInit();
-                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                    bitmap.StreamSource = fs;
-                    bitmap.EndInit();
-                    vm.Background.ImageSource = bitmap;
+                    bg.ImageSource = new BitmapImage(defaultUri);
                 }
             }
+
+            Logger.Debug("Background loaded successfully", "Main");
+            vm.Background = bg;
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                App.Current.ThisMainWindow.BackgroundImage.ImageSource = bg.ImageSource;
+            });
             App.Current.IsLoadingBackground = false;
-            App.Current.ThisMainWindow.Height = Convert.ToDouble(App.Current.DataModel.MainHeight);
-            App.Current.ThisMainWindow.Width = Convert.ToDouble(App.Current.DataModel.MainWidth);
         }
 
-        /// <summary>
-        /// 检查程序所需要的配置文件
-        /// </summary>
-        /// <param name="main"></param>
         public void CheckConfig(MainWindow main)
         {
-            if (!Directory.Exists(@"UserData"))
-            {
+            if (!Directory.Exists("UserData"))
                 Directory.CreateDirectory("UserData");
-            }
-            if (!File.Exists(Path.Combine(App.Current.DataModel.GamePath ?? "Err", "Yuanshen.exe")) &&
-                !File.Exists(Path.Combine(App.Current.DataModel.GamePath ?? "Err", "GenshinImpact.exe")))
+
+            var game = App.Current.DataModel.ActiveGame;
+            var gamePath = App.Current.DataModel.GamePath ?? "";
+            if (game == null) return;
+            if (!File.Exists(Path.Combine(gamePath, game.CnExeName)) &&
+                !File.Exists(Path.Combine(gamePath, game.GlobalExeName)))
             {
+                Logger.Info("No game path configured, showing guide page", "Main");
                 main.MainGrid.Children.Add(new Views.GuidePage());
             }
         }

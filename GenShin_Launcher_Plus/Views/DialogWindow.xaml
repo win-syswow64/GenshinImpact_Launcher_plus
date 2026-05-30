@@ -1,0 +1,53 @@
+<Window x:Class="GenShin_Launcher_Plus.Views.DialogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        SizeToContent="WidthAndHeight"
+        MinWidth="380" MaxWidth="520">
+    <Border Background="#80000000" Padding="0">
+        <Border x:Name="CardBorder" Background="#2D2D2D" CornerRadius="8"
+                BorderBrush="#383838" BorderThickness="1"
+                MinWidth="340" MaxWidth="460">
+            <Grid Margin="24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Icon + Title -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
+                    <TextBlock x:Name="IconText" FontFamily="{StaticResource IconFont}"
+                               FontSize="24" VerticalAlignment="Center"
+                               Margin="0,0,12,0" Foreground="#B0FFFFFF"/>
+                    <TextBlock x:Name="TitleText" FontSize="18" FontWeight="SemiBold"
+                               FontFamily="{StaticResource DefaultFont}"
+                               Foreground="White" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Message -->
+                <TextBlock x:Name="MessageText" Grid.Row="1"
+                           FontSize="14" FontFamily="{StaticResource DefaultFont}"
+                           Foreground="#CCFFFFFF" TextWrapping="Wrap"
+                           Margin="36,0,0,24" LineHeight="22"/>
+
+                <!-- Buttons -->
+                <StackPanel x:Name="ButtonPanel" Grid.Row="2"
+                            Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="PrimaryBtn" Style="{StaticResource PrimaryButton}"
+                            MinWidth="96" Height="34" FontSize="13"
+                            Click="PrimaryBtn_Click"/>
+                    <Button x:Name="SecondaryBtn" Style="{StaticResource SecondaryButton}"
+                            MinWidth="96" Height="34" FontSize="13"
+                            Margin="8,0,0,0" Click="SecondaryBtn_Click"
+                            Visibility="Collapsed"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Border>
+</Window>

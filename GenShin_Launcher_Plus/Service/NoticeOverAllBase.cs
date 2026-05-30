@@ -1,174 +1,98 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+﻿using System.Collections.Generic;
 using System.Windows;
-using GenShin_Launcher_Plus.Helper;
-using GenShin_Launcher_Plus.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
+using GenShin_Launcher_Plus.Models;
 
 namespace GenShin_Launcher_Plus.Service
 {
-
-    /// <summary>
-    /// 连接SettingsPage与HomePage的服务
-    /// 隶属于ViewModel
-    /// </summary>
-
     public class NoticeOverAllBase : ObservableObject
     {
-        //贯通到主页面的索引
-        private int _MainPagesIndex;
-        public int MainPagesIndex
-        {
-            get => _MainPagesIndex;
-            set => SetProperty(ref _MainPagesIndex, value);
-        }
-        //Home页面显示label
-
-        private string _SwitchUser;
+        private string _switchUser = string.Empty;
         public string SwitchUser
         {
-            get => _SwitchUser;
-            set => SetProperty(ref _SwitchUser, value);
+            get => _switchUser;
+            set => SetProperty(ref _switchUser, value);
         }
 
-        private string _SwitchPort;
+        private string _switchPort = string.Empty;
         public string SwitchPort
         {
             get
             {
-                string gameClientType = App.Current.DataModel.Cps switch
-                {
-                    "mihoyo" => App.Current.Language.GameClientTypePStr,
-                    "bilibili" => App.Current.Language.GameClientTypeBStr,
-                    "hoyoverse" => App.Current.Language.GameClientTypeMStr,
-                    _ => App.Current.Language.GameClientTypeNullStr,
-                };
-                return $"{App.Current.Language.GameClientStr} : {gameClientType} ";
+                var biz = App.Current.DataModel.ActiveBiz;
+                string gameClientType = biz.IsBilibili() ? App.Current.Language.GameClientTypeBStr
+                    : biz.IsGlobalServer() ? App.Current.Language.GameClientTypeMStr
+                    : App.Current.Language.GameClientTypePStr;
+                return $"{App.Current.Language.GameClientStr} : {gameClientType}";
             }
-            set => SetProperty(ref _SwitchPort, value);
+            set => SetProperty(ref _switchPort, value);
         }
 
-        private int _GamePortListIndex;
+        private int _gamePortListIndex;
         public int GamePortListIndex
         {
             get
             {
-                int index = App.Current.DataModel.Cps switch
-                {
-                    "mihoyo" => 0,
-                    "bilibili" => 1,
-                    "hoyoverse" => 2,
-                    _ => -1,
-                };
-                string gameClientType = index switch
-                {
-                    0 => App.Current.Language.GameClientTypePStr,
-                    1 => App.Current.Language.GameClientTypeBStr,
-                    2 => App.Current.Language.GameClientTypeMStr,
-                    _ => App.Current.Language.GameClientTypeNullStr,
-                };
-                SwitchPort = $"{App.Current.Language.GameClientStr} : {gameClientType} ";
+                var biz = App.Current.DataModel.ActiveBiz;
+                int index = biz.IsBilibili() ? 1 : biz.IsGlobalServer() ? 2 : 0;
+                string gameClientType = biz.IsBilibili() ? App.Current.Language.GameClientTypeBStr
+                    : biz.IsGlobalServer() ? App.Current.Language.GameClientTypeMStr
+                    : App.Current.Language.GameClientTypePStr;
+                SwitchPort = $"{App.Current.Language.GameClientStr} : {gameClientType}";
                 return index;
             }
-            set
-            {
-                SetProperty(ref _GamePortListIndex, value);
-                if (App.Current.DataModel.Cps != "hoyoverse")
-                {
-                    switch (value)
-                    {
-                        case 0:
-                            App.Current.DataModel.Cps = "mihoyo";
-                            App.Current.DataModel.Channel = 1;
-                            App.Current.DataModel.Sub_channel = 1;
-                            if (File.Exists(Path.Combine(App.Current.DataModel.GamePath, "YuanShen_Data/Plugins/PCGameSDK.dll")))
-                                File.Delete(Path.Combine(App.Current.DataModel.GamePath, "YuanShen_Data/Plugins/PCGameSDK.dll"));
-                            App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypePStr}";
-                            break;
-                        case 1:
-                            App.Current.DataModel.Cps = "bilibili";
-                            App.Current.DataModel.Channel = 14;
-                            App.Current.DataModel.Sub_channel = 0;
-                            if (!File.Exists(Path.Combine(App.Current.DataModel.GamePath, "YuanShen_Data/Plugins/PCGameSDK.dll")))
-                            {
-                                try
-                                {
-                                    FileHelper.ExtractEmbededAppResource("StaticRes/mihoyosdk.dll", 
-                                        Path.Combine(App.Current.DataModel.GamePath, "YuanShen_Data/Plugins/PCGameSDK.dll"));
-                                }
-                                catch (Exception ex)
-                                {
-                                    MessageBox.Show(ex.Message);
-                                }
-                            }
-                            App.Current.NoticeOverAllBase.SwitchPort = $"{App.Current.Language.GameClientStr} : {App.Current.Language.GameClientTypeBStr}";
-                            break;
-                        default:
-                            break;
-                    }
-                    App.Current.DataModel.SaveDataToFile();
-                }
-            }
+            set => SetProperty(ref _gamePortListIndex, value);
         }
 
-        private string _SwitchUserValue;
-        public string SwitchUserValue
+        private string? _switchUserValue;
+        public string? SwitchUserValue
         {
-            get => _SwitchUserValue;
+            get => _switchUserValue;
             set
             {
-                SetProperty(ref _SwitchUserValue, value);
-                if (SwitchUserValue != null && SwitchUserValue != "")
+                SetProperty(ref _switchUserValue, value);
+                if (!string.IsNullOrEmpty(SwitchUserValue))
                 {
-                    App.Current.NoticeOverAllBase.SwitchUser = $"{App.Current.Language.UserNameLab} : {SwitchUserValue}";
-                    //更改注册表账号状态
+                    SwitchUser = $"{App.Current.Language.UserNameLab} : {SwitchUserValue}";
                     App.Current.DataModel.SwitchUser = SwitchUserValue;
                     App.Current.DataModel.SaveDataToFile();
-                    RegistryService registryControl = new();
-                    registryControl.SetToRegistry(SwitchUserValue);
+                    new RegistryService().SetToRegistry(SwitchUserValue);
                 }
             }
         }
 
-        //游戏端口列表
-        private List<GamePortListModel> _GamePortLists;
+        private List<GamePortListModel> _gamePortLists = new();
         public List<GamePortListModel> GamePortLists
         {
-            get => _GamePortLists;
-            set => SetProperty(ref _GamePortLists, value);
+            get => _gamePortLists;
+            set => SetProperty(ref _gamePortLists, value);
         }
 
-        //选择游戏端口Combobox控件状态
-        private string _IsGamePortLists;
-        public string IsGamePortLists
+        private Visibility _isGamePortLists = Visibility.Visible;
+        public Visibility IsGamePortLists
         {
             get
             {
-                return App.Current.DataModel.Cps switch
-                {
-                    "hoyoverse" => "Hidden",
-                    _ => "Visible",
-                };
+                _isGamePortLists = App.Current.DataModel.ActiveBiz.IsGlobalServer()
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+                return _isGamePortLists;
             }
-            set => SetProperty(ref _IsGamePortLists, value);
+            set => SetProperty(ref _isGamePortLists, value);
         }
 
-        //选择账户Combobox控件状态
-        private string _IsSwitchUser;
-        public string IsSwitchUser
+        private Visibility _isSwitchUser = Visibility.Collapsed;
+        public Visibility IsSwitchUser
         {
-            get => _IsSwitchUser;
-            set => SetProperty(ref _IsSwitchUser, value);
+            get => _isSwitchUser;
+            set => SetProperty(ref _isSwitchUser, value);
         }
 
-        //用户列表
-        public List<UserListModel> _UserLists;
+        private List<UserListModel> _userLists = new();
         public List<UserListModel> UserLists
         {
-            get => _UserLists;
-            set => SetProperty(ref _UserLists, value);
+            get => _userLists;
+            set => SetProperty(ref _userLists, value);
         }
     }
-
 }

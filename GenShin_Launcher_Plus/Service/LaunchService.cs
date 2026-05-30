@@ -1,34 +1,49 @@
-﻿using GenShin_Launcher_Plus.Helper;
-using GenShin_Launcher_Plus.Models;
-using GenShin_Launcher_Plus.Service.IService;
-using MahApps.Metro.Controls.Dialogs;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
+using GenShin_Launcher_Plus.Core;
+using GenShin_Launcher_Plus.Helper;
+using GenShin_Launcher_Plus.Models;
+using GenShin_Launcher_Plus.Service.IService;
 
 namespace GenShin_Launcher_Plus.Service
 {
     public class LaunchService : ILaunchService
     {
-        private IDialogCoordinator dialogCoordinator;
-        public LaunchService(IDialogCoordinator instance)
+        public LaunchService()
         {
-            dialogCoordinator = instance;
             ReadUserList();
-            CreateGamePortList();
         }
 
-        /// <summary>
-        /// 异步启动游戏并且传入游戏参数
-        /// </summary>
-        /// <returns></returns>
         public async Task RunGameAsync()
         {
-            //从Config中读取启动参数
-            string gameMain = Path.Combine(App.Current.DataModel.GamePath, "YuanShen.exe");
+            var biz = App.Current.DataModel.ActiveBiz;
+            var profile = App.Current.DataModel.ActiveGame;
+            if (profile == null)
+            {
+                Logger.Error("ActiveGame is null for {biz}", "Launch");
+                DialogHelper.ShowWarning(App.Current.Language.PathErrorMessageStr, App.Current.Language.Error);
+                return;
+            }
+            var gamePath = App.Current.DataModel.GamePath;
+
+            string exeName = profile.GetExeName(biz);
+            string gameMain = Path.Combine(gamePath, exeName);
+
+            if (!File.Exists(gameMain))
+            {
+                Logger.Warn($"Game executable not found: {gameMain}", "Launch");
+                DialogHelper.ShowWarning(App.Current.Language.PathErrorMessageStr, App.Current.Language.Error);
+                return;
+            }
+
+            // Apply server config before launching (Starward-style)
+            var configService = new GameConfigService(profile, biz, gamePath);
+            configService.ApplyServerConfig();
+
             string arg = new CommandLineBuilder()
                 .AppendIf("-popupwindow", App.Current.DataModel.IsPopup)
                 .Append("-screen-fullscreen", App.Current.DataModel.FullSize)
@@ -36,74 +51,49 @@ namespace GenShin_Launcher_Plus.Service
                 .Append("-screen-width", App.Current.DataModel.Width)
                 .ToString();
 
-            //判断游戏文件、目录是否存在
-            if (!File.Exists(gameMain))
-            {
-                gameMain = Path.Combine(App.Current.DataModel.GamePath, "GenshinImpact.exe");
-                if (!File.Exists(gameMain))
-                {
-                    await dialogCoordinator.ShowMessageAsync(
-                        this, App.Current.Language.Error,
-                        App.Current.Language.PathErrorMessageStr,
-                        MessageDialogStyle.Affirmative,
-                        new MetroDialogSettings()
-                        { AffirmativeButtonText = App.Current.Language.Determine });
-                    return;
-                }
-            }
+            Logger.Info($"Starting game: {gameMain} ({biz}) with args: {arg}", "Launch");
             Application.Current.MainWindow.WindowState = WindowState.Minimized;
 
-            Process game = new()
+            var process = new Process
             {
-                StartInfo = new ProcessStartInfo()
+                StartInfo = new ProcessStartInfo
                 {
                     FileName = gameMain,
                     Verb = "runas",
                     UseShellExecute = true,
-                    WorkingDirectory = App.Current.DataModel.GamePath,
+                    WorkingDirectory = gamePath,
                     Arguments = arg,
                 }
             };
 
-            bool started = game.Start();
+            bool started = process.Start();
 
-                //判断是否开启启动游戏后关闭原神启动器Plus
-           if (App.Current.DataModel.IsRunThenClose)
-           {
+            if (App.Current.DataModel.IsRunThenClose)
+            {
+                Logger.Info("Game started, exiting launcher (run-then-close)", "Launch");
                 Environment.Exit(0);
-           }
-           else
-           {
-                if (started)
-                {
-                     await game.WaitForExitAsync();
-                     Application.Current.MainWindow.WindowState = WindowState.Normal;
-                }
-           }
+            }
+            else if (started)
+            {
+                Logger.Debug("Waiting for game process to exit", "Launch");
+                await process.WaitForExitAsync();
+                Logger.Info("Game process exited", "Launch");
+                Application.Current.MainWindow.WindowState = WindowState.Normal;
+            }
+            else
+            {
+                Logger.Error($"Failed to start game process: {gameMain}", "Launch");
+            }
         }
 
-        /// <summary>
-        /// 读取用户文件到NoticeOverAllBase中的列表
-        /// </summary>
         public void ReadUserList()
         {
             App.Current.NoticeOverAllBase.UserLists = new List<UserListModel>();
-            DirectoryInfo TheFolder = new(@"UserData");
-            foreach (FileInfo NextFile in TheFolder.GetFiles())
+            if (!Directory.Exists("UserData")) return;
+            foreach (var file in new DirectoryInfo("UserData").GetFiles())
             {
-                App.Current.NoticeOverAllBase.UserLists.Add(new UserListModel { UserName = NextFile.Name });
+                App.Current.NoticeOverAllBase.UserLists.Add(new UserListModel { UserName = file.Name });
             }
-        }
-        /// <summary>
-        /// 创建NoticeOverAllBase中的客户端列表
-        /// </summary>
-        public void CreateGamePortList()
-        {
-            App.Current.NoticeOverAllBase.GamePortLists = new()
-            {
-                new () { GamePort = App.Current.Language.GameClientTypePStr },
-                new () { GamePort = App.Current.Language.GameClientTypeBStr }
-            };
         }
     }
 }
