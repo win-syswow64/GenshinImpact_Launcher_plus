@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:ctrl="clr-namespace:GenShin_Launcher_Plus.Controls"
         mc:Ignorable="d"
         MouseLeftButtonDown="WindowDragMove"
         d:Height="730" d:Width="1280"
@@ -14,10 +15,6 @@
         Title="原神启动器Plus">
     <Border CornerRadius="8" ClipToBounds="True" Background="#202020">
         <Grid x:Name="MainGrid">
-            <Grid.Background>
-                <ImageBrush x:Name="BackgroundImage" Stretch="UniformToFill"
-                            ImageSource="/Images/MainBackground.jpg"/>
-            </Grid.Background>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
@@ -27,163 +24,71 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
+            <!-- Background layers -->
+            <Image x:Name="BackgroundImage" Stretch="UniformToFill" Grid.RowSpan="2" Grid.ColumnSpan="2" Source="/Images/MainBackground.jpg"/>
+            <MediaElement x:Name="BackgroundVideo" Stretch="UniformToFill" Grid.RowSpan="2" Grid.ColumnSpan="2" LoadedBehavior="Manual" UnloadedBehavior="Stop" IsMuted="True" Opacity="0" MediaOpened="MediaElement_Opened" MediaFailed="MediaElement_Failed" MediaEnded="MediaElement_Ended"/>
+            <Image x:Name="VideoFrameImage" Stretch="UniformToFill" Grid.RowSpan="2" Grid.ColumnSpan="2" Opacity="0"/>
+            <Image x:Name="VideoOverlayImage" Stretch="UniformToFill" Grid.RowSpan="2" Grid.ColumnSpan="2" Opacity="0"/>
+
             <!-- Top Game Selector Bar -->
-            <Border Grid.Row="0" Grid.ColumnSpan="2" Height="52"
-                    Background="#CC1A1A1A" BorderBrush="#20FFFFFF"
-                    BorderThickness="0,0,0,1">
+            <Border Grid.Row="0" Grid.ColumnSpan="2" Height="52" Background="#CC1A1A1A" BorderBrush="#20FFFFFF" BorderThickness="0,0,0,1">
                 <Grid Margin="12,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-
-                    <!-- Game Icons -->
-                    <ListBox Grid.Column="0" ItemsSource="{Binding GameList}"
-                             SelectedIndex="{Binding SelectedGameIndex}"
-                             BorderThickness="0" Background="Transparent"
-                             Padding="0" VerticalAlignment="Center"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal"/>
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
+                    <ListBox Grid.Column="0" ItemsSource="{Binding GameList}" SelectedIndex="{Binding SelectedGameIndex}" BorderThickness="0" Background="Transparent" Padding="0" VerticalAlignment="Center" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                        <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
-                                <Setter Property="Padding" Value="0"/>
-                                <Setter Property="Margin" Value="0,0,6,0"/>
-                                <Setter Property="Background" Value="Transparent"/>
-                                <Setter Property="BorderThickness" Value="0"/>
-                                <Setter Property="HorizontalContentAlignment" Value="Center"/>
-                                <Setter Property="VerticalContentAlignment" Value="Center"/>
-                                <Setter Property="Cursor" Value="Hand"/>
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="ListBoxItem">
-                                            <Border x:Name="Bd" BorderThickness="2"
-                                                    BorderBrush="Transparent" CornerRadius="8"
-                                                    Background="Transparent" SnapsToDevicePixels="True">
-                                                <ContentPresenter HorizontalAlignment="Center"
-                                                                  VerticalAlignment="Center"/>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#40FFFFFF"/>
-                                                </Trigger>
-                                                <Trigger Property="IsSelected" Value="True">
-                                                    <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,6,0"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Cursor" Value="Hand"/>
+                                <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Bd" BorderThickness="2" BorderBrush="Transparent" CornerRadius="8" Background="Transparent"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#40FFFFFF"/></Trigger>
+                                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate></Setter.Value></Setter>
                             </Style>
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid Width="36" Height="36" ToolTip="{Binding DisplayName}">
-                                    <Border CornerRadius="8" Background="{Binding IconColor}"/>
-                                    <TextBlock Text="{Binding IconText}" FontSize="16" FontWeight="Bold"
-                                               Foreground="White" HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"/>
-                                </Grid>
+                                <Border Width="36" Height="36" CornerRadius="8" ClipToBounds="True" ToolTip="{Binding DisplayName}">
+                                    <Image Source="{Binding IconPath}" Stretch="UniformToFill">
+                                        <Image.Style><Style TargetType="Image"><Style.Triggers><DataTrigger Binding="{Binding IsInstalled}" Value="False"><Setter Property="Opacity" Value="0.35"/></DataTrigger></Style.Triggers></Style></Image.Style>
+                                    </Image>
+                                </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-
-                    <!-- Server Selector -->
-                    <StackPanel Grid.Column="2" Orientation="Horizontal"
-                                VerticalAlignment="Center" Margin="8,0,0,0">
-                        <TextBlock Text="{Binding languages.GameClientStr}"
-                                   Foreground="#80FFFFFF" FontSize="12"
-                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox ItemsSource="{Binding ServerDisplayNames}"
-                                  SelectedIndex="{Binding SelectedServerIndex}"
-                                  Style="{StaticResource DarkComboBox}"
-                                  MinWidth="90" Height="30" FontSize="12"/>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <TextBlock Text="{Binding languages.GameClientStr}" Foreground="#80FFFFFF" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox ItemsSource="{Binding ServerDisplayNames}" SelectedIndex="{Binding SelectedServerIndex}" Style="{StaticResource DarkComboBox}" MinWidth="90" Height="30" FontSize="12"/>
                     </StackPanel>
                 </Grid>
             </Border>
 
             <!-- Left Sidebar -->
-            <Border x:Name="Sidebar" Grid.Row="1" Grid.Column="0" Width="48"
-                    Background="#B31E1E1E" BorderBrush="#20FFFFFF"
-                    BorderThickness="0,0,1,0">
+            <Border x:Name="Sidebar" Grid.Row="1" Grid.Column="0" Width="48" Background="#B31E1E1E" BorderBrush="#20FFFFFF" BorderThickness="0,0,1,0">
                 <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-
-                    <Button Grid.Row="0" x:Name="ToggleBtn"
-                            Style="{StaticResource IconButton}" Width="36" Height="36"
-                            Margin="6,12,0,0" HorizontalAlignment="Left"
-                            Foreground="#B0FFFFFF" Click="ToggleSidebar"
-                            Content="&#xE700;"/>
-
-                    <!-- Collapsed (icons only) -->
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Button Grid.Row="0" x:Name="ToggleBtn" Style="{StaticResource IconButton}" Width="36" Height="36" Margin="6,12,0,0" HorizontalAlignment="Left" Foreground="#B0FFFFFF" Click="ToggleSidebar" Content="&#xE700;"/>
                     <StackPanel x:Name="CollapsedPanel" Grid.Row="1" Margin="6,8,6,0">
-                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF"
-                                Command="{Binding OpenImagesDirectoryCommand}" ToolTip="{Binding languages.NavScreenshotsToolTip}" Visibility="{Binding NavScreenshotsVisible}"
-                                Content="&#xE8B9;"/>
-                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF"
-                                Command="{Binding OpenQQGroupUrlCommand}" ToolTip="{Binding languages.NavQQGroupText}" Visibility="{Binding NavQQGroupVisible}"
-                                Content="&#xE8B8;"/>
-                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF"
-                                Command="{Binding OpenAboutCommand}" ToolTip="{Binding languages.NavAboutText}" Visibility="{Binding NavAboutVisible}"
-                                Content="&#xE946;"/>
-                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF"
-                                Command="{Binding NavigateProgramSettingsCommand}" ToolTip="{Binding languages.NavSettingsText}"
-                                Content="&#xE713;"/>
+                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF" Command="{Binding OpenImagesDirectoryCommand}" ToolTip="{Binding languages.NavScreenshotsToolTip}" Visibility="{Binding NavScreenshotsVisible}" Content="&#xE8B9;"/>
+                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF" Command="{Binding OpenQQGroupUrlCommand}" ToolTip="{Binding languages.NavQQGroupText}" Visibility="{Binding NavQQGroupVisible}" Content="&#xE8B8;"/>
+                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF" Command="{Binding OpenAboutCommand}" ToolTip="{Binding languages.NavAboutText}" Visibility="{Binding NavAboutVisible}" Content="&#xE946;"/>
+                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF" Command="{Binding NavigateProgramSettingsCommand}" ToolTip="{Binding languages.NavSettingsText}" Content="&#xE713;"/>
                     </StackPanel>
-
-                    <!-- Expanded (icon + text) -->
                     <StackPanel x:Name="ExpandedPanel" Grid.Row="1" Margin="8,8,8,0" Visibility="Collapsed">
-                        <RadioButton Style="{StaticResource NavButton}" IsChecked="True"
-                                     Command="{Binding OpenImagesDirectoryCommand}" Margin="0,0,0,2" Visibility="{Binding NavScreenshotsVisible}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE8B9;" FontFamily="{StaticResource IconFont}"
-                                           FontSize="16" Width="28" Margin="0,0,4,0"/>
-                                <TextBlock Text="{Binding languages.NavScreenshotsText}" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </RadioButton>
-                        <RadioButton Style="{StaticResource NavButton}"
-                                     Command="{Binding OpenQQGroupUrlCommand}" Margin="0,0,0,2" Visibility="{Binding NavQQGroupVisible}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE713;" FontFamily="{StaticResource IconFont}"
-                                           FontSize="16" Width="28" Margin="0,0,4,0"/>
-                                <TextBlock Text="{Binding languages.NavQQGroupText}" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </RadioButton>
-                        <RadioButton Style="{StaticResource NavButton}"
-                                     Command="{Binding OpenAboutCommand}" Margin="0,0,0,2" Visibility="{Binding NavAboutVisible}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE946;" FontFamily="{StaticResource IconFont}"
-                                           FontSize="16" Width="28" Margin="0,0,4,0"/>
-                                <TextBlock Text="{Binding languages.NavAboutText}" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </RadioButton>
-                        <RadioButton Style="{StaticResource NavButton}"
-                                     Command="{Binding NavigateProgramSettingsCommand}" Margin="0,0,0,2">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE713;" FontFamily="{StaticResource IconFont}"
-                                           FontSize="16" Width="28" Margin="0,0,4,0"/>
-                                <TextBlock Text="{Binding languages.NavSettingsText}" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </RadioButton>
+                        <RadioButton Style="{StaticResource NavButton}" IsChecked="True" Command="{Binding OpenImagesDirectoryCommand}" Margin="0,0,0,2" Visibility="{Binding NavScreenshotsVisible}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B9;" FontFamily="{StaticResource IconFont}" FontSize="16" Width="28" Margin="0,0,4,0"/><TextBlock Text="{Binding languages.NavScreenshotsText}" VerticalAlignment="Center"/></StackPanel></RadioButton>
+                        <RadioButton Style="{StaticResource NavButton}" Command="{Binding OpenQQGroupUrlCommand}" Margin="0,0,0,2" Visibility="{Binding NavQQGroupVisible}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" FontFamily="{StaticResource IconFont}" FontSize="16" Width="28" Margin="0,0,4,0"/><TextBlock Text="{Binding languages.NavQQGroupText}" VerticalAlignment="Center"/></StackPanel></RadioButton>
+                        <RadioButton Style="{StaticResource NavButton}" Command="{Binding OpenAboutCommand}" Margin="0,0,0,2" Visibility="{Binding NavAboutVisible}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE946;" FontFamily="{StaticResource IconFont}" FontSize="16" Width="28" Margin="0,0,4,0"/><TextBlock Text="{Binding languages.NavAboutText}" VerticalAlignment="Center"/></StackPanel></RadioButton>
+                        <RadioButton Style="{StaticResource NavButton}" Command="{Binding NavigateProgramSettingsCommand}" Margin="0,0,0,2"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" FontFamily="{StaticResource IconFont}" FontSize="16" Width="28" Margin="0,0,4,0"/><TextBlock Text="{Binding languages.NavSettingsText}" VerticalAlignment="Center"/></StackPanel></RadioButton>
                     </StackPanel>
-
-                    <!-- Bottom (collapsed) -->
                     <StackPanel x:Name="CollapsedBottom" Grid.Row="2" Margin="6,0,6,8">
-                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF"
-                                Command="{Binding MainMinimizedCommand}" ToolTip="{Binding languages.MinimizeToolTip}"
-                                Content="&#xE949;"/>
-                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF"
-                                Command="{Binding ExitProgramCommand}" ToolTip="{Binding languages.CloseToolTip}"
-                                Content="&#xE8BB;"/>
+                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF" Command="{Binding MainMinimizedCommand}" ToolTip="{Binding languages.MinimizeToolTip}" Content="&#xE949;"/>
+                        <Button Style="{StaticResource IconButton}" Foreground="#B0FFFFFF" Command="{Binding ExitProgramCommand}" ToolTip="{Binding languages.CloseToolTip}" Content="&#xE8BB;"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -191,27 +96,45 @@
             <!-- Content Area -->
             <Border Grid.Row="1" Grid.Column="1" x:Name="ContentArea" Background="Transparent" MouseLeftButtonDown="ContentArea_MouseLeftButtonDown">
                 <Grid>
-                    <!-- Overlay for secondary pages -->
-                    <Border x:Name="PageOverlay" Background="#A0000000"
-                            Visibility="{Binding OverlayVisible}"/>
-
+                    <Border x:Name="PageOverlay" Background="#A0000000" Visibility="{Binding OverlayVisible}"/>
                     <ContentControl x:Name="PageContent" Content="{Binding CurrentPage}"/>
 
-                    <!-- Launch Panel: visible only when no page overlay -->
-                    <StackPanel x:Name="LaunchPanel" Orientation="Horizontal"
-                                HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                Margin="0,0,32,32"
-                                Visibility="{Binding LaunchPanelVisible}">
-                        <Button Content="{Binding languages.RunGameBtn}"
-                                Style="{StaticResource PrimaryButton}"
-                                Command="{Binding RunGameCommand}" IsEnabled="{Binding CanRunGame}"
-                                Height="52" Width="220"
-                                FontSize="18" FontWeight="SemiBold"/>
-                        <Button Style="{StaticResource SecondaryButton}" Height="52" Width="52"
-                                FontSize="18" FontFamily="{StaticResource IconFont}"
-                                Command="{Binding OpenGameSettingsCommand}"
-                                Content="&#xE713;"
-                                Margin="8,0,0,0"/>
+                    <!-- Bottom-right panel -->
+                    <StackPanel x:Name="LaunchPanel" Orientation="Vertical" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,32,32" Visibility="{Binding LaunchPanelVisible}">
+
+                        <!-- Pre-download button (shown when predownload available and not installing) -->
+                        <Button Content="{Binding languages.PreDownloadBtn}" Style="{StaticResource SecondaryButton}" Command="{Binding PreDownloadCommand}" Height="36" Width="220" FontSize="13" Margin="0,0,0,8" Visibility="{Binding ShowPreDownloadButton, Converter={StaticResource BoolToVis}}"/>
+
+                        <!-- Download progress: circular ring + info -->
+                        <Border Visibility="{Binding ShowProgressPanel, Converter={StaticResource BoolToVis}}" Background="#E01A1A1A" CornerRadius="12" Padding="20,16" Margin="0,0,0,12" Width="220">
+                            <StackPanel HorizontalAlignment="Center">
+                                <!-- Circular progress ring -->
+                                <ctrl:ProgressRing Width="100" Height="100" RingThickness="7"
+                                                   Progress="{Binding InstallService.ProgressPercent}"
+                                                   ForegroundRingColor="{DynamicResource AccentBrush}"
+                                                   BackgroundRingColor="#30FFFFFF"
+                                                   TextColor="White" FontSize="18"
+                                                   Margin="0,0,0,12"/>
+
+                                <!-- Status text -->
+                                <TextBlock Text="{Binding InstallService.StatusText}" Foreground="#B0FFFFFF" FontSize="12" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+
+                                <!-- Download speed -->
+                                <TextBlock Text="{Binding InstallService.DownloadSpeedText}" Foreground="{DynamicResource AccentBrush}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,2"/>
+
+                                <!-- Bytes progress -->
+                                <TextBlock Text="{Binding InstallService.BytesProgressText}" Foreground="#80FFFFFF" FontSize="11" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+
+                                <!-- Pause / Cancel -->
+                                <Button Content="{Binding languages.PauseBtn}" Style="{StaticResource SecondaryButton}" Command="{Binding CancelInstallCommand}" Height="30" Width="120" FontSize="12"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Main action buttons -->
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="{Binding ActionButtonText}" Style="{StaticResource PrimaryButton}" Command="{Binding RunGameCommand}" IsEnabled="{Binding ActionButtonEnabled}" Height="52" Width="220" FontSize="18" FontWeight="SemiBold"/>
+                            <Button Style="{StaticResource SecondaryButton}" Height="52" Width="52" FontSize="18" FontFamily="{StaticResource IconFont}" Command="{Binding OpenGameSettingsCommand}" Content="&#xE713;" Margin="8,0,0,0"/>
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </Border>

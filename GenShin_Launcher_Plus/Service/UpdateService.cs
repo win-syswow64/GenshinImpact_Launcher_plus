@@ -99,6 +99,7 @@ namespace GenShin_Launcher_Plus.Service
                 {
                     var updatePage = new Views.UpdatePage();
                     Grid.SetColumnSpan(updatePage, 2);
+                    Grid.SetRowSpan(updatePage, 2);
                     Panel.SetZIndex(updatePage, 999);
                     main.MainGrid.Children.Add(updatePage);
                     App.Current.IsLoadUpdated = true;

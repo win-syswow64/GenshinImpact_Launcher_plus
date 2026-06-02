@@ -8,12 +8,12 @@ namespace GenShin_Launcher_Plus.Models
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        protected void OnPropertyChanged([CallerMemberName] string name = null)
+        protected void OnPropertyChanged([CallerMemberName] string? name = null)
         {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name ?? string.Empty));
         }
 
-        protected bool SetField<T>(ref T field, T value, [CallerMemberName] string name = null)
+        protected bool SetField<T>(ref T field, T value, [CallerMemberName] string? name = null)
         {
             if (EqualityComparer<T>.Default.Equals(field, value)) return false;
             field = value;
@@ -96,6 +96,15 @@ namespace GenShin_Launcher_Plus.Models
 
         private string _pathErrorMessageStr;
         public string PathErrorMessageStr { get => _pathErrorMessageStr; set => SetField(ref _pathErrorMessageStr, value); }
+
+        private string _autoSearchToolTip;
+        public string AutoSearchToolTip { get => _autoSearchToolTip; set => SetField(ref _autoSearchToolTip, value); }
+
+        private string _gameFoundMsg;
+        public string GameFoundMsg { get => _gameFoundMsg; set => SetField(ref _gameFoundMsg, value); }
+
+        private string _gameNotFoundMsg;
+        public string GameNotFoundMsg { get => _gameNotFoundMsg; set => SetField(ref _gameNotFoundMsg, value); }
 
         // === Account management ===
         private string _addUsersPageTitle;
@@ -571,5 +580,29 @@ namespace GenShin_Launcher_Plus.Models
         private string _selectGameTitle;
         public string SelectGameTitle { get => _selectGameTitle; set => SetField(ref _selectGameTitle, value); }
 
+        // === Game Install / Update ===
+        private string _installGameBtn;
+        public string InstallGameBtn { get => _installGameBtn; set => SetField(ref _installGameBtn, value); }
+        private string _updateGameBtn;
+        public string UpdateGameBtn { get => _updateGameBtn; set => SetField(ref _updateGameBtn, value); }
+        private string _preDownloadBtn;
+        public string PreDownloadBtn { get => _preDownloadBtn; set => SetField(ref _preDownloadBtn, value); }
+        private string _downloadingText;
+        public string DownloadingText { get => _downloadingText; set => SetField(ref _downloadingText, value); }
+        private string _installingText;
+        public string InstallingText { get => _installingText; set => SetField(ref _installingText, value); }
+        private string _pauseBtn;
+        public string PauseBtn { get => _pauseBtn; set => SetField(ref _pauseBtn, value); }
+        private string _continueBtn;
+        public string ContinueBtn { get => _continueBtn; set => SetField(ref _continueBtn, value); }
+        private string _installCompleteText;
+        public string InstallCompleteText { get => _installCompleteText; set => SetField(ref _installCompleteText, value); }
+        private string _gameNotInstalledText;
+        public string GameNotInstalledText { get => _gameNotInstalledText; set => SetField(ref _gameNotInstalledText, value); }
+        private string _selectInstallPathText;
+        public string SelectInstallPathText { get => _selectInstallPathText; set => SetField(ref _selectInstallPathText, value); }
+
+
     }
 }
+

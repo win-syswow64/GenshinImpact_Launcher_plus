@@ -129,10 +129,10 @@ namespace GenShin_Launcher_Plus.Services
                     var fileName = resourceName.Substring(EmbeddedResourcePrefix.Length);
                     var filePath = Path.Combine(LangDir, fileName);
 
+                    // Always overwrite to pick up new keys from rebuilt assembly
                     if (File.Exists(filePath))
                     {
-                        Logger.Debug($"Skip extract: {fileName} (exists)", "Lang");
-                        continue;
+                        Logger.Debug($"Overwriting: {fileName}", "Lang");
                     }
 
                     using var stream = assembly.GetManifestResourceStream(resourceName);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -10,6 +10,8 @@ using CommunityToolkit.Mvvm.Input;
 using GenShin_Launcher_Plus.Helper;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service;
+using System.Collections.ObjectModel;
+using System.Linq;
 using GenShin_Launcher_Plus.Services;
 using GenShin_Launcher_Plus.Service.IService;
 using Microsoft.Win32;
@@ -36,6 +38,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             SaveLangCommand = new RelayCommand(SaveAndRestart);
             ThisPageRemoveCommand = new RelayCommand(ThisPageRemove);
             ChooseGamePathCommand = new RelayCommand(ChooseGamePath);
+            AutoSearchGameCommand = new RelayCommand(AutoSearchGame);
             SwitchAccountCommand = new RelayCommand(() => FlipViewSelectedIndex = 1);
             SwitchGameSettingsCommand = new RelayCommand(() => FlipViewSelectedIndex = 0);
             SwitchThemeSettingsCommand = new RelayCommand(() => FlipViewSelectedIndex = 2);
@@ -52,8 +55,10 @@ namespace GenShin_Launcher_Plus.ViewModels
             IsDailyBackgroundCommand = new RelayCommand(IsDailyBackground);
             SetAccentColorCommand = new RelayCommand<string>(SetAccentColor);
 
+            InstallAudioPackCommand = new RelayCommand<string>(InstallAudioPack);
             _accentColorIndex = FindAccentColorIndex(App.Current.DataModel.AccentColor);
             _userLists = UserDataService.ReadUserList();
+            RefreshAudioPacks();
             _gamePortLists = SettingService.CreateGamePortList();
             _displaySizeLists = SettingService.CreateDisplaySizeList();
             _gameWindowModeList = SettingService.CreateGameWindowModeList();
@@ -225,6 +230,148 @@ namespace GenShin_Launcher_Plus.ViewModels
             set => SetProperty(ref _customBackgroundPath, value);
         }
 
+        // === Background Browser ===
+        public class BackgroundItem
+        {
+            public string Id { get; set; }
+            public string ThumbnailUrl { get; set; }
+            public string DisplayUrl { get; set; }
+            public bool IsVideo { get; set; }
+            public string Label { get; set; }
+            public Visibility VideoIndicatorVisible => IsVideo ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private ObservableCollection<BackgroundItem> _backgroundItems = new();
+        public ObservableCollection<BackgroundItem> BackgroundItems
+        {
+            get => _backgroundItems;
+            set => SetProperty(ref _backgroundItems, value);
+        }
+
+        private int _selectedBackgroundIndex = -1;
+        public int SelectedBackgroundIndex
+        {
+            get => _selectedBackgroundIndex;
+            set
+            {
+                if (SetProperty(ref _selectedBackgroundIndex, value) && value >= 0)
+                {
+                    _ = ApplyBackgroundAsync(value);
+                }
+            }
+        }
+
+        private bool _isLoadingBackgrounds;
+        public bool IsLoadingBackgrounds
+        {
+            get => _isLoadingBackgrounds;
+            set => SetProperty(ref _isLoadingBackgrounds, value);
+        }
+
+        public ICommand RefreshBackgroundsCommand => new AsyncRelayCommand(LoadBackgroundsAsync);
+        public ICommand ChooseCustomBackgroundCommand => new RelayCommand(ChooseCustomBackground);
+
+        private async Task LoadBackgroundsAsync()
+        {
+            var profile = App.Current.DataModel.ActiveGame;
+            if (profile == null) return;
+            IsLoadingBackgrounds = true;
+            BackgroundService.ClearApiCache(); // force fresh fetch on manual refresh
+            try
+            {
+                var bgs = await BackgroundService.FetchBackgroundsAsync(profile);
+                var items = new ObservableCollection<BackgroundItem>();
+                for (int i = 0; i < bgs.Count; i++)
+                {
+                    var bg = bgs[i];
+                    string thumb = bg.Background?.Url ?? bg.Icon?.Url ?? "";
+                    string label = bg.IsVideo ? "Video" : $"Image {i + 1}";
+                    items.Add(new BackgroundItem
+                    {
+                        Id = bg.Id,
+                        ThumbnailUrl = thumb,
+                        DisplayUrl = thumb,
+                        IsVideo = bg.IsVideo,
+                        Label = label,
+                    });
+                }
+                BackgroundItems = items;
+
+                // Highlight the currently selected one
+                string selectedId = App.Current.DataModel.GetSelectedBackgroundId(profile.Id);
+                if (!string.IsNullOrEmpty(selectedId))
+                {
+                    for (int i = 0; i < items.Count; i++)
+                        if (items[i].Id == selectedId) { SelectedBackgroundIndex = i; break; }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to load backgrounds: " + ex.Message, "Background");
+            }
+            IsLoadingBackgrounds = false;
+        }
+
+        private async Task ApplyBackgroundAsync(int index)
+        {
+            if (index < 0 || index >= BackgroundItems.Count) return;
+            var profile = App.Current.DataModel.ActiveGame;
+            if (profile == null) return;
+            var item = BackgroundItems[index];
+
+            try
+            {
+                // Clear any custom background
+                App.Current.DataModel.SetCustomBackground(profile.Id, "");
+                App.Current.DataModel.SetSelectedBackgroundId(profile.Id, item.Id);
+
+                // Cache the file
+                string url = item.IsVideo
+                    ? (await BackgroundService.FetchBackgroundsAsync(profile)).FirstOrDefault(b => b.Id == item.Id)?.Video?.Url
+                    : item.DisplayUrl;
+
+                if (!string.IsNullOrEmpty(url))
+                {
+                    string cached = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id);
+                    if (!string.IsNullOrEmpty(cached))
+                    {
+                        if (item.IsVideo)
+                            App.Current.ThisMainWindow.SetBackgroundVideo(cached);
+                        else
+                            App.Current.ThisMainWindow.SetBackgroundImage(cached);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to apply background: " + ex.Message, "Background");
+            }
+        }
+
+        private void ChooseCustomBackground()
+        {
+            var dialog = new OpenFileDialog
+            {
+                Filter = "Image & Video Files (*.png;*.jpg;*.webp;*.mp4;*.mkv;*.webm)|*.png;*.jpg;*.webp;*.mp4;*.mkv;*.webm",
+                Title = languages.ChooseBgDialogTitle
+            };
+            if (dialog.ShowDialog() == true)
+            {
+                var profile = App.Current.DataModel.ActiveGame;
+                if (profile == null) return;
+
+                // Clear API background selection
+                App.Current.DataModel.SetSelectedBackgroundId(profile.Id, "");
+                App.Current.DataModel.SetCustomBackground(profile.Id, dialog.FileName);
+                CustomBackgroundPath = dialog.FileName;
+
+                if (BackgroundService.IsVideoFile(dialog.FileName))
+                    App.Current.ThisMainWindow.SetBackgroundVideo(dialog.FileName);
+                else
+                    App.Current.ThisMainWindow.SetBackgroundImage(dialog.FileName);
+            }
+        }
+
         private bool _isCloseUpdate;
         public bool IsCloseUpdate
         {
@@ -261,6 +408,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         public ICommand SaveSettingsCommand { get; }
         public ICommand ThisPageRemoveCommand { get; }
         public ICommand ChooseGamePathCommand { get; }
+        public ICommand AutoSearchGameCommand { get; }
         public ICommand SwitchAccountCommand { get; }
         public ICommand SwitchGameSettingsCommand { get; }
         public ICommand SwitchProgramSettingCommand { get; }
@@ -286,6 +434,104 @@ namespace GenShin_Launcher_Plus.ViewModels
             };
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                 GamePath = dialog.SelectedPath;
+        }
+
+        private void AutoSearchGame()
+        {
+            var biz = App.Current.DataModel.ActiveBiz;
+            var game = App.Current.DataModel.ActiveGame;
+            if (game == null) return;
+
+            var path = GameSearchService.FindGamePath(game, biz.Server);
+            if (path != null)
+            {
+                GamePath = path;
+                App.Current.DataModel.GamePath = path;
+                App.Current.DataModel.SaveDataToFile();
+                App.Current.ThisMainWindow.ViewModel.RefreshGameSelector();
+                // Use LanguageService to get the string with a reliable fallback
+                string msg = LanguageService.Instance.GetString("GameFoundMsg");
+                if (msg == "GameFoundMsg") msg = "\u627E\u5230\u6E38\u620F\u5BA2\u6237\u7AEF\uFF1A{0}";
+                DialogHelper.ShowInfo(string.Format(msg, path), languages.TipsStr);
+            }
+            else
+            {
+                string msg = LanguageService.Instance.GetString("GameNotFoundMsg");
+                if (msg == "GameNotFoundMsg") msg = "\u672A\u627E\u5230\u6E38\u620F\u5BA2\u6237\u7AEF\uFF0C\u8BF7\u624B\u52A8\u9009\u62E9\u5B89\u88C5\u76EE\u5F55\u3002";
+                DialogHelper.ShowWarning(msg, languages.Error);
+            }
+        }
+
+        // === Audio Language Pack Management ===
+        private List<AudioPackInfo> _audioPacks = new();
+        public List<AudioPackInfo> AudioPacks { get => _audioPacks; set { SetProperty(ref _audioPacks, value); OnPropertyChanged(nameof(AudioPackDisplayText)); } }
+
+        public string AudioPackDisplayText
+        {
+            get
+            {
+                if (AudioPacks.Count == 0) return "未检测到游戏目录";
+                var installed = AudioPacks.Where(p => p.IsInstalled).Select(p => p.DisplayName);
+                return installed.Any() ? string.Join(", ", installed) : "无已安装音频包";
+            }
+        }
+
+        private string _audioPackStatusText = "";
+        public string AudioPackStatusText { get => _audioPackStatusText; set => SetProperty(ref _audioPackStatusText, value); }
+
+        private bool _isAudioDownloading;
+        public bool IsAudioDownloading { get => _isAudioDownloading; set { SetProperty(ref _isAudioDownloading, value); OnPropertyChanged(nameof(AudioPackPanelEnabled)); } }
+        public bool AudioPackPanelEnabled => !IsAudioDownloading;
+
+        public ICommand InstallAudioPackCommand { get; }
+
+        private GameInstallService? _audioInstallService;
+        public GameInstallService AudioInstallService => _audioInstallService ??= new GameInstallService();
+
+        public void RefreshAudioPacks()
+        {
+            var path = App.Current.DataModel.GamePath;
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+            {
+                AudioPacks = new List<AudioPackInfo>();
+                return;
+            }
+            AudioPacks = GameInstallService.GetAudioPackStatus(path);
+        }
+
+        private async void InstallAudioPack(string? audioField)
+        {
+            if (string.IsNullOrEmpty(audioField)) return;
+            var gameBiz = App.Current.DataModel.ActiveGameBiz;
+            var installPath = App.Current.DataModel.GamePath;
+            if (string.IsNullOrEmpty(installPath)) { DialogHelper.ShowWarning("请先设置游戏目录", languages.TipsStr); return; }
+
+            IsAudioDownloading = true;
+            AudioPackStatusText = $"正在下载 {audioField} 音频包...";
+            try
+            {
+                _audioInstallService = new GameInstallService();
+                OnPropertyChanged(nameof(AudioInstallService));
+                await _audioInstallService.DownloadAudioPackAsync(gameBiz, installPath, audioField);
+                if (_audioInstallService.State == GameInstallState.Finished)
+                {
+                    AudioPackStatusText = $"{audioField} 音频包安装完成";
+                    RefreshAudioPacks();
+                }
+                else if (_audioInstallService.State == GameInstallState.Error)
+                {
+                    AudioPackStatusText = $"安装失败: {_audioInstallService.ErrorText}";
+                }
+            }
+            catch (Exception ex)
+            {
+                AudioPackStatusText = $"安装失败: {ex.Message}";
+                Logger.Error($"Audio pack install failed: {ex}", "Settings");
+            }
+            finally
+            {
+                IsAudioDownloading = false;
+            }
         }
 
         private void SaveDisplaySize()
@@ -368,18 +614,7 @@ namespace GenShin_Launcher_Plus.ViewModels
 
         private void SetMainBackground()
         {
-            var dialog = new OpenFileDialog
-            {
-                Filter = "Image Files (*.png;*.jpg;*.webp)|*.png;*.jpg;*.webp",
-                Title = languages.ChooseBgDialogTitle
-            };
-            if (dialog.ShowDialog() == true)
-            {
-                App.Current.DataModel.BackgroundPath = dialog.FileName;
-                CustomBackgroundPath = dialog.FileName;
-                UseXunkongWallpaper = false;
-                _ = new MainService(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
-            }
+            ChooseCustomBackground();
         }
 
         private void IsDailyBackground()
@@ -424,7 +659,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             Logger.Info($"Saving game path: {GamePath} for {biz}", "Settings");
             if (!string.IsNullOrEmpty(SwitchUser))
             {
-                App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab}��{SwitchUser}";
+                App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab}��{SwitchUser}";
                 App.Current.NoticeOverAllBase.IsSwitchUser = Visibility.Visible;
                 RegistryService.SetToRegistry(SwitchUser);
             }

@@ -328,5 +328,25 @@ namespace GenShin_Launcher_Plus.Core
         {
             parser.SaveSettings();
         }
+        // === Per-Game Background ===
+        public string GetSelectedBackgroundId(string gameId)
+        {
+            return parser.GetSetting($"bg_{gameId}", "SelectedBgId", 0) ?? "";
+        }
+
+        public void SetSelectedBackgroundId(string gameId, string bgId)
+        {
+            parser.AddSetting($"bg_{gameId}", "SelectedBgId", bgId ?? "");
+        }
+
+        public string GetCustomBackground(string gameId)
+        {
+            return parser.GetSetting($"bg_{gameId}", "CustomBgPath", 0) ?? "";
+        }
+
+        public void SetCustomBackground(string gameId, string path)
+        {
+            parser.AddSetting($"bg_{gameId}", "CustomBgPath", path ?? "");
+        }
     }
 }

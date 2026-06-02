@@ -11,7 +11,7 @@
                 <Button Style="{StaticResource IconButton}" Width="32" Height="32"
                         Content="&#xE72B;" Foreground="#B0FFFFFF"
                         Command="{Binding ThisPageRemoveCommand}" ToolTip="{Binding languages.BackToolTip}"
-                        VerticalAlignment="Center"/>
+                        VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <!-- Game mode tabs -->
                 <RadioButton Style="{StaticResource NavButton}" IsChecked="True"
                              Command="{Binding SwitchGameSettingsCommand}" GroupName="GameTab"
@@ -87,10 +87,50 @@
                             <CheckBox Content="{Binding languages.BorderlessCkB}" Style="{StaticResource ToggleSwitch}" IsChecked="{Binding IsPopup}" Margin="0,0,0,12"/>
                             <TextBlock Style="{StaticResource SectionHeaderText}" Text="{Binding languages.GameDirectoryHeader}"/>
                             <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBox Grid.Column="0" Style="{StaticResource InputTextBox}" Text="{Binding GamePath}" IsReadOnly="True"/>
-                                <Button Grid.Column="1" Content="..." Style="{StaticResource SecondaryButton}" Width="40" Command="{Binding ChooseGamePathCommand}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="1" Content="&#xE721;" Style="{StaticResource IconButton}" Width="32" Height="32" Command="{Binding AutoSearchGameCommand}" ToolTip="{Binding languages.AutoSearchToolTip}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="2" Content="..." Style="{StaticResource SecondaryButton}" Width="40" Command="{Binding ChooseGamePathCommand}" Margin="8,0,0,0"/>
                             </Grid>
+
+                            <!-- Audio Language Packs -->
+                            <TextBlock Style="{StaticResource SectionHeaderText}" Text="音频语言包" Margin="0,16,0,0"/>
+                            <TextBlock Text="{Binding AudioPackDisplayText}" Foreground="#80FFFFFF" FontSize="12" Margin="0,0,0,8"/>
+                            <StackPanel IsEnabled="{Binding AudioPackPanelEnabled}">
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Chinese (zh-cn)" Foreground="#C0FFFFFF" VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1" Content="安装" Style="{StaticResource SecondaryButton}" Width="60" Height="28" FontSize="12"
+                                            Command="{Binding InstallAudioPackCommand}" CommandParameter="zh-cn"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="English (en-us)" Foreground="#C0FFFFFF" VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1" Content="安装" Style="{StaticResource SecondaryButton}" Width="60" Height="28" FontSize="12"
+                                            Command="{Binding InstallAudioPackCommand}" CommandParameter="en-us"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Japanese (ja-jp)" Foreground="#C0FFFFFF" VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1" Content="安装" Style="{StaticResource SecondaryButton}" Width="60" Height="28" FontSize="12"
+                                            Command="{Binding InstallAudioPackCommand}" CommandParameter="ja-jp"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Korean (ko-kr)" Foreground="#C0FFFFFF" VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1" Content="安装" Style="{StaticResource SecondaryButton}" Width="60" Height="28" FontSize="12"
+                                            Command="{Binding InstallAudioPackCommand}" CommandParameter="ko-kr"/>
+                                </Grid>
+                            </StackPanel>
+                            <!-- Audio download progress -->
+                            <Border Visibility="{Binding IsAudioDownloading, Converter={StaticResource BoolToVis}}" Background="#20FFFFFF" CornerRadius="8" Padding="12,8" Margin="0,8,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding AudioInstallService.StatusText}" Foreground="#B0FFFFFF" FontSize="12"/>
+                                    <ProgressBar Value="{Binding AudioInstallService.ProgressPercent}" Maximum="100" Height="4" Margin="0,4,0,0"
+                                                 Foreground="{DynamicResource AccentBrush}" Background="#20FFFFFF"/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="{Binding AudioPackStatusText}" Foreground="#80FFFFFF" FontSize="11" Margin="0,4,0,0"/>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -229,14 +269,53 @@
                                     </Border.Style>
                                 </Border>
                             </WrapPanel>
-
+                            <!-- Background Settings -->
                             <TextBlock Style="{StaticResource SectionHeaderText}" Text="{Binding languages.BackgroundSettingsHeader}"/>
-                            <CheckBox Content="{Binding languages.BackgroundXK}" Style="{StaticResource ToggleSwitch}" IsChecked="{Binding UseXunkongWallpaper}" Command="{Binding IsDailyBackgroundCommand}" Margin="0,0,0,20"/>
+
+                            <!-- API Background Browser -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding languages.CustomBackgroundHeader}" Foreground="#80FFFFFF" FontSize="12" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" Content="&#xE72C;" Style="{StaticResource IconButton}" Width="32" Height="32"
+                                        Command="{Binding RefreshBackgroundsCommand}" ToolTip="Refresh"/>
+                            </Grid>
+
+                            <!-- Background thumbnails -->
+                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                          Margin="0,0,0,16" Height="98">
+                                <ItemsControl ItemsSource="{Binding BackgroundItems}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Width="160" Height="90" CornerRadius="6" Cursor="Hand"
+                                                    Margin="0,0,8,0" BorderThickness="2"
+                                                    BorderBrush="#40FFFFFF"
+                                                    MouseLeftButtonDown="BackgroundThumb_Click">
+                                                <Grid>
+                                                    <Image Source="{Binding ThumbnailUrl}" Stretch="UniformToFill"/>
+                                                    <Border Background="#80000000" CornerRadius="4"
+                                                            HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                            Padding="6,2" Margin="4"
+                                                            Visibility="{Binding VideoIndicatorVisible}">
+                                                        <TextBlock Text="Video" FontSize="10" Foreground="White"/>
+                                                    </Border>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+
+                            <!-- Custom file selection -->
                             <TextBlock Style="{StaticResource SectionHeaderText}" Text="{Binding languages.CustomBackgroundHeader}"/>
                             <Grid Margin="0,0,0,20">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBox Grid.Column="0" Style="{StaticResource InputTextBox}" Text="{Binding CustomBackgroundPath, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="True"/>
-                                <Button Grid.Column="1" Content="{Binding languages.ChooseImageBtn}" Style="{StaticResource SecondaryButton}" Command="{Binding SetMainBackgroundCommand}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="1" Content="{Binding languages.ChooseImageBtn}" Style="{StaticResource SecondaryButton}" Command="{Binding ChooseCustomBackgroundCommand}" Margin="8,0,0,0"/>
                             </Grid>
                             <Button Content="{Binding languages.SaveTodayBgBtn}" Style="{StaticResource SecondaryButton}" Command="{Binding SaveBackgroundCommand}" HorizontalAlignment="Left"/>
                         </StackPanel>

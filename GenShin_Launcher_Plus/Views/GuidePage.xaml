@@ -28,10 +28,12 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBox Grid.Column="0" Style="{StaticResource InputTextBox}"
                              Text="{Binding GamePath, UpdateSourceTrigger=PropertyChanged}"/>
-                    <Button Grid.Column="1" Content="..." Style="{StaticResource SecondaryButton}"
+                    <Button Grid.Column="1" Content="&#xE721;" Style="{StaticResource IconButton}" Width="32" Height="32" Command="{Binding AutoSearchCommand}" Margin="8,0,0,0" ToolTip="{Binding languages.AutoSearchToolTip}"/>
+                    <Button Grid.Column="2" Content="..." Style="{StaticResource SecondaryButton}"
                             Command="{Binding DirchooseCommand}" Width="40" Margin="8,0,0,0"/>
                 </Grid>
             </StackPanel>

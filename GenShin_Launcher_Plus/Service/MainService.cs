@@ -1,11 +1,7 @@
 ﻿using System;
 using System.IO;
-using System.Net;
-using System.Net.Http;
 using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
+using System.Linq;
 using GenShin_Launcher_Plus.Helper;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service.IService;
@@ -16,6 +12,7 @@ namespace GenShin_Launcher_Plus.Service
 {
     public class MainService : IMainWindowService
     {
+        private static readonly System.Threading.SemaphoreSlim _bgSemaphore = new(1, 1);
         public MainService(MainWindow main, MainWindowViewModel vm)
         {
             CheckConfig(main);
@@ -33,99 +30,147 @@ namespace GenShin_Launcher_Plus.Service
         {
             App.Current.IsLoadingBackground = true;
             Logger.Debug("Loading background", "Main");
-            var bg = new ImageBrush { Stretch = Stretch.UniformToFill };
-            var defaultUri = new Uri("pack://application:,,,/Images/MainBackground.jpg", UriKind.Absolute);
-
-            var bgPath = App.Current.DataModel.BackgroundPath;
-            if (!string.IsNullOrEmpty(bgPath) && File.Exists(bgPath))
+            try
             {
-                // Custom background from local file
-                using var fs = File.OpenRead(bgPath);
-                var bitmap = new BitmapImage();
-                bitmap.BeginInit();
-                bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                bitmap.StreamSource = fs;
-                bitmap.EndInit();
-                bg.ImageSource = bitmap;
+                await LoadGameBackgroundAsync();
             }
-            else if (App.Current.DataModel.UseXunkongWallpaper)
+            catch (Exception ex)
             {
-                // Daily image toggle ON: load from API (with local cache)
-                bg.ImageSource = new BitmapImage(defaultUri);
-                try
+                Logger.Warn("Background load failed: " + ex.Message, "Background");
+                Logger.Warn("Stack trace: " + ex.StackTrace, "Background");
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
-                    App.Current.BackgroundModel ??= new BackgroundModel();
-                    string directUrl = await HtmlHelper.GetDailyImageDirectUrlAsync();
-                    if (!string.IsNullOrEmpty(directUrl))
-                    {
-                        App.Current.BackgroundModel.BackgroundUrl = directUrl;
+                    App.Current.ThisMainWindow.SetBackgroundResource(
+                        "pack://application:,,,/Images/MainBackground.jpg");
+                });
+            }
+            App.Current.IsLoadingBackground = false;
+        }
 
-                        using var client = new HttpClient(new HttpClientHandler
-                        {
-                            AutomaticDecompression = DecompressionMethods.All
-                        });
-                        client.DefaultRequestHeaders.UserAgent.ParseAdd(
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-                        var bytes = await client.GetByteArrayAsync(directUrl);
+        public static async Task LoadGameBackgroundAsync()
+        {
+            // Wait for any in-progress load to finish, then proceed.
+            // Timeout prevents deadlock if the previous load is stuck.
+            if (!await _bgSemaphore.WaitAsync(TimeSpan.FromSeconds(10)))
+            {
+                Logger.Warn("BG semaphore timeout, forcing load", "BG");
+            }
+            try
+            {
+                await LoadGameBackgroundCoreAsync();
+            }
+            finally
+            {
+                _bgSemaphore.Release();
+            }
+        }
 
-                        var configDir = Path.Combine(AppContext.BaseDirectory, "Config");
-                        if (!Directory.Exists(configDir))
-                            Directory.CreateDirectory(configDir);
-                        var wallpaperPath = Path.Combine(configDir, "Wallpaper.jpg");
-                        File.WriteAllBytes(wallpaperPath, bytes);
+        private static async Task LoadGameBackgroundCoreAsync()
+        {
+            var main = App.Current.ThisMainWindow;
+            if (main == null) { Logger.Debug("main is null, skip", "BG"); return; }
+            var profile = App.Current.DataModel.ActiveGame;
+            if (profile == null) { Logger.Debug("profile is null, skip", "BG"); return; }
+            Logger.Debug("LoadGameBackground: game=" + profile.Id + " biz=" + App.Current.DataModel.ActiveGameBiz, "BG");
 
-                        var ms = new MemoryStream(bytes);
-                        var newBitmap = new BitmapImage();
-                        newBitmap.BeginInit();
-                        newBitmap.CacheOption = BitmapCacheOption.OnLoad;
-                        newBitmap.StreamSource = ms;
-                        newBitmap.EndInit();
-                        bg.ImageSource = newBitmap;
-                    }
-                }
-                catch
+            // 1. Legacy global custom background (backward compat)
+            string legacyBg = App.Current.DataModel.BackgroundPath;
+            if (!string.IsNullOrEmpty(legacyBg) && File.Exists(legacyBg))
+            {
+                Logger.Debug("Using legacy background: " + legacyBg, "BG");
+                System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundImage(legacyBg));
+                return;
+            }
+
+            // 2. Per-game custom background file
+            string customBg = App.Current.DataModel.GetCustomBackground(profile.Id);
+            if (!string.IsNullOrEmpty(customBg) && File.Exists(customBg))
+            {
+                Logger.Debug("Using custom background: " + customBg, "BG");
+                if (BackgroundService.IsVideoFile(customBg))
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(customBg));
+                else
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundImage(customBg));
+                return;
+            }
+
+            // 3. API backgrounds
+            Logger.Debug("Fetching API backgrounds...", "BG");
+            var allBgs = await BackgroundService.FetchBackgroundsAsync(profile);
+            Logger.Debug("Fetched " + allBgs.Count + " backgrounds from API", "BG");
+
+            if (allBgs.Count == 0)
+            {
+                Logger.Warn("No backgrounds returned from API", "BG");
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    main.SetBackgroundResource("pack://application:,,,/Images/MainBackground.jpg"));
+                return;
+            }
+
+            // Log all available backgrounds
+            for (int i = 0; i < allBgs.Count; i++)
+            {
+                var b = allBgs[i];
+                string url = b.IsVideo ? (b.Video?.Url ?? "null") : (b.Background?.Url ?? "null");
+                Logger.Debug("  bg[" + i + "] id=" + b.Id + " type=" + b.Type + " url=" + url, "BG");
+            }
+
+            // Try to cache and display each background in order
+            string? cacheFile = null;
+            HoYoGameBackground? selected = null;
+            foreach (var bg in allBgs)
+            {
+                string? url = bg.IsVideo ? bg.Video?.Url : bg.Background?.Url;
+                if (string.IsNullOrEmpty(url) || url.StartsWith("pack:"))
                 {
-                    bg.ImageSource = new BitmapImage(defaultUri);
+                    Logger.Debug("  skip bg id=" + bg.Id + " (no url)", "BG");
+                    continue;
                 }
+                Logger.Debug("  trying bg id=" + bg.Id + " url=" + url, "BG");
+                cacheFile = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id);
+                if (cacheFile != null)
+                {
+                    selected = bg;
+                    Logger.Debug("  cached: " + cacheFile, "BG");
+                    break;
+                }
+                Logger.Debug("  cache returned null, trying next", "BG");
+            }
+
+            if (cacheFile == null || selected == null)
+            {
+                Logger.Warn("All backgrounds failed to cache, using default", "BG");
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    main.SetBackgroundResource("pack://application:,,,/Images/MainBackground.jpg"));
+                return;
+            }
+
+            // Display the background
+            if (selected.IsVideo)
+            {
+                // Cache the theme overlay (for video overlay)
+                string? themePath = null;
+                if (selected.Theme != null && !string.IsNullOrEmpty(selected.Theme.Url))
+                    themePath = await BackgroundService.CacheBackgroundFileAsync(selected.Theme.Url, profile.Id);
+                // Cache the static fallback image (for when video can't play, e.g. WebM)
+                string? fallbackPath = null;
+                if (selected.Background != null && !string.IsNullOrEmpty(selected.Background.Url))
+                    fallbackPath = await BackgroundService.CacheBackgroundFileAsync(selected.Background.Url, profile.Id);
+                Logger.Debug("Setting VIDEO bg: video=" + cacheFile + " theme=" + themePath + " fallback=" + fallbackPath, "BG");
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    main.SetBackgroundVideo(cacheFile, themePath, fallbackPath));
             }
             else
             {
-                // Daily image toggle OFF: load MiHoYo background
-                bg.ImageSource = new BitmapImage(defaultUri);
-                try
-                {
-                    App.Current.BackgroundModel ??= new BackgroundModel();
-                    App.Current.BackgroundModel.BackgroundUrl = await HtmlHelper.GetBackgroundImageUrlAsync();
-                    string bgUrl = App.Current.BackgroundModel.BackgroundUrl;
-                    if (!string.IsNullOrEmpty(bgUrl) && bgUrl != "null")
-                    {
-                        using var client = new HttpClient(new HttpClientHandler
-                        {
-                            AutomaticDecompression = DecompressionMethods.All
-                        });
-                        var bytes = await client.GetByteArrayAsync(bgUrl);
-                        var ms = new MemoryStream(bytes);
-                        var newBitmap = new BitmapImage();
-                        newBitmap.BeginInit();
-                        newBitmap.CacheOption = BitmapCacheOption.OnLoad;
-                        newBitmap.StreamSource = ms;
-                        newBitmap.EndInit();
-                        bg.ImageSource = newBitmap;
-                    }
-                }
-                catch
-                {
-                    bg.ImageSource = new BitmapImage(defaultUri);
-                }
+                Logger.Debug("Setting IMAGE background: " + cacheFile, "BG");
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    main.SetBackgroundImage(cacheFile));
             }
 
-            Logger.Debug("Background loaded successfully", "Main");
-            vm.Background = bg;
-            Application.Current.Dispatcher.Invoke(() =>
-            {
-                App.Current.ThisMainWindow.BackgroundImage.ImageSource = bg.ImageSource;
-            });
-            App.Current.IsLoadingBackground = false;
+            if (!selected.IsCustom && !string.IsNullOrEmpty(selected.Id))
+                App.Current.DataModel.SetSelectedBackgroundId(profile.Id, selected.Id);
+
+            Logger.Debug("Background loaded OK: " + selected.Id, "BG");
         }
 
         public void CheckConfig(MainWindow main)
@@ -134,13 +179,24 @@ namespace GenShin_Launcher_Plus.Service
                 Directory.CreateDirectory("UserData");
 
             var game = App.Current.DataModel.ActiveGame;
-            var gamePath = App.Current.DataModel.GamePath ?? "";
             if (game == null) return;
+            var gamePath = App.Current.DataModel.GamePath ?? "";
             if (!File.Exists(Path.Combine(gamePath, game.CnExeName)) &&
                 !File.Exists(Path.Combine(gamePath, game.GlobalExeName)))
             {
-                Logger.Info("No game path configured, showing guide page", "Main");
-                main.MainGrid.Children.Add(new Views.GuidePage());
+                Logger.Info("Game path not configured, running auto-search", "Main");
+                var biz = App.Current.DataModel.ActiveBiz;
+                var found = GameSearchService.FindGamePath(game, biz.Server);
+                if (found != null)
+                {
+                    Logger.Info("Auto-found game path: " + found, "Main");
+                    App.Current.DataModel.GamePath = found;
+                    App.Current.DataModel.SaveDataToFile();
+                }
+                else
+                {
+                    Logger.Info("Auto-search found nothing, user can set path in settings", "Main");
+                }
             }
         }
     }

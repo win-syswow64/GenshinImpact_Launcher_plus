@@ -1,4 +1,5 @@
-using System.Collections.Generic;
+Ôªøusing System.Collections.Generic;
+using System.IO;
 
 namespace GenShin_Launcher_Plus.Models
 {
@@ -20,9 +21,32 @@ namespace GenShin_Launcher_Plus.Models
         public string DataRegistryValue { get; set; }
         public string ApiGameId { get; set; }
         public string ApiLauncherId { get; set; }
-        public string BilibiliSdkPath { get; set; }
+        public string? BilibiliSdkPath { get; set; }
 
-        /// <summary>Icon background color for the game selector.</summary>
+        /// <summary>Pack URI to the official game icon.</summary>
+        public string IconPath => $"/Images/{Id}_icon.png";
+        /// <summary>Whether the game executable exists on disk.</summary>
+        public bool IsInstalled
+        {
+            get
+            {
+                try
+                {
+                    var biz = App.Current.DataModel?.ActiveBiz;
+                    string exe = biz is GameBiz b ? GetExeName(b) : CnExeName;
+                    string path = App.Current.DataModel?.GetGamePath($"{Id}_cn") ?? "";
+                    if (!string.IsNullOrEmpty(path) && File.Exists(System.IO.Path.Combine(path, exe)))
+                        return true;
+                    path = App.Current.DataModel?.GetGamePath($"{Id}_global") ?? "";
+                    if (!string.IsNullOrEmpty(path) && File.Exists(System.IO.Path.Combine(path, exe)))
+                        return true;
+                }
+                catch { }
+                return false;
+            }
+        }
+
+        /// <summary>Icon background color for the game selector (fallback).</summary>
         public string IconColor => Id switch
         {
             "genshin" => "#E5A93C",
@@ -30,16 +54,6 @@ namespace GenShin_Launcher_Plus.Models
             "zzz" => "#00D4AA",
             "honkai3" => "#B060FF",
             _ => "#808080",
-        };
-
-        /// <summary>Single-character label shown inside the game icon.</summary>
-        public string IconText => Id switch
-        {
-            "genshin" => "\u539F",
-            "starrail" => "\u661F",
-            "zzz" => "\u7EDD",
-            "honkai3" => "\u5D29",
-            _ => "?",
         };
 
         public string GetExeName(GameBiz biz) =>
@@ -61,7 +75,7 @@ namespace GenShin_Launcher_Plus.Models
                 $"{Id}_cn",
                 $"{Id}_global",
             };
-            if (BilibiliSdkPath != null)
+            if (!string.IsNullOrEmpty(BilibiliSdkPath))
                 servers.Add($"{Id}_bilibili");
             return servers;
         }
@@ -73,12 +87,12 @@ namespace GenShin_Launcher_Plus.Models
         public static GameProfile Genshin { get; } = new()
         {
             Id = "genshin",
-            DisplayName = @"‘≠…Ò",
+            DisplayName = @"ÂéüÁ•û",
             CnExeName = "YuanShen.exe",
             GlobalExeName = "GenshinImpact.exe",
             CnDataFolder = "YuanShen_Data",
             GlobalDataFolder = "GenshinImpact_Data",
-            CnRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\‘≠…Ò",
+            CnRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\‘≠ÔøΩÔøΩ",
             GlobalRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\Genshin Impact",
             CnSdkRegistryValue = "MIHOYOSDK_ADL_PROD_CN_h3123967166",
             GlobalSdkRegistryValue = "MIHOYOSDK_ADL_PROD_OVERSEA_h1158948810",
@@ -91,12 +105,12 @@ namespace GenShin_Launcher_Plus.Models
         public static GameProfile StarRail { get; } = new()
         {
             Id = "starrail",
-            DisplayName = @"±¿ªµ£∫–«Ò∑Ã˙µ¿",
+            DisplayName = @"Â¥©ÂùèÔºöÊòüÁ©πÈìÅÈÅì",
             CnExeName = "StarRail.exe",
             GlobalExeName = "StarRail.exe",
             CnDataFolder = "StarRail_Data",
             GlobalDataFolder = "StarRail_Data",
-            CnRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\±¿ªµ£∫–«Ò∑Ã˙µ¿",
+            CnRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ",
             GlobalRegistryKey = @"HKEY_CURRENT_USER\Software\Cognosphere\Star Rail",
             CnSdkRegistryValue = "MIHOYOSDK_ADL_PROD_CN_h3123967166",
             GlobalSdkRegistryValue = "MIHOYOSDK_ADL_PROD_OVERSEA_h1158948810",
@@ -109,12 +123,12 @@ namespace GenShin_Launcher_Plus.Models
         public static GameProfile ZZZ { get; } = new()
         {
             Id = "zzz",
-            DisplayName = @"æ¯«¯¡„",
+            DisplayName = @"ÁªùÂå∫Èõ∂",
             CnExeName = "ZenlessZoneZero.exe",
             GlobalExeName = "ZenlessZoneZero.exe",
             CnDataFolder = "ZenlessZoneZero_Data",
             GlobalDataFolder = "ZenlessZoneZero_Data",
-            CnRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\æ¯«¯¡„",
+            CnRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ",
             GlobalRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\ZenlessZoneZero",
             CnSdkRegistryValue = "MIHOYOSDK_ADL_PROD_CN_h3123967166",
             GlobalSdkRegistryValue = "MIHOYOSDK_ADL_PROD_OVERSEA_h1158948810",
@@ -127,12 +141,12 @@ namespace GenShin_Launcher_Plus.Models
         public static GameProfile Honkai3 { get; } = new()
         {
             Id = "honkai3",
-            DisplayName = @"±¿ªµ3",
+            DisplayName = @"Â¥©Âùè3",
             CnExeName = "BH3.exe",
             GlobalExeName = "BH3.exe",
             CnDataFolder = "BH3_Data",
             GlobalDataFolder = "BH3_Data",
-            CnRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\±¿ªµ3",
+            CnRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\ÔøΩÔøΩÔøΩÔøΩ3",
             GlobalRegistryKey = @"HKEY_CURRENT_USER\Software\miHoYo\Honkai Impact 3rd",
             CnSdkRegistryValue = "MIHOYOSDK_ADL_PROD_CN_h3123967166",
             GlobalSdkRegistryValue = "MIHOYOSDK_ADL_PROD_OVERSEA_h1158948810",
