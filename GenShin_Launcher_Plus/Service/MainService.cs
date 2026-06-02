@@ -51,9 +51,11 @@ namespace GenShin_Launcher_Plus.Service
         {
             // Wait for any in-progress load to finish, then proceed.
             // Timeout prevents deadlock if the previous load is stuck.
-            if (!await _bgSemaphore.WaitAsync(TimeSpan.FromSeconds(10)))
+            var entered = await _bgSemaphore.WaitAsync(TimeSpan.FromSeconds(10));
+            if (!entered)
             {
-                Logger.Warn("BG semaphore timeout, forcing load", "BG");
+                Logger.Warn("BG semaphore timeout, skip stale load", "BG");
+                return;
             }
             try
             {
@@ -71,22 +73,20 @@ namespace GenShin_Launcher_Plus.Service
             if (main == null) { Logger.Debug("main is null, skip", "BG"); return; }
             var profile = App.Current.DataModel.ActiveGame;
             if (profile == null) { Logger.Debug("profile is null, skip", "BG"); return; }
-            Logger.Debug("LoadGameBackground: game=" + profile.Id + " biz=" + App.Current.DataModel.ActiveGameBiz, "BG");
+            var loadGameId = profile.Id;
+            var loadGameBiz = App.Current.DataModel.ActiveGameBiz;
+            bool IsStillActive() =>
+                App.Current.DataModel.ActiveGameBiz == loadGameBiz &&
+                App.Current.DataModel.ActiveGame?.Id == loadGameId;
 
-            // 1. Legacy global custom background (backward compat)
-            string legacyBg = App.Current.DataModel.BackgroundPath;
-            if (!string.IsNullOrEmpty(legacyBg) && File.Exists(legacyBg))
-            {
-                Logger.Debug("Using legacy background: " + legacyBg, "BG");
-                System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundImage(legacyBg));
-                return;
-            }
+            Logger.Debug("LoadGameBackground: game=" + profile.Id + " biz=" + loadGameBiz, "BG");
 
-            // 2. Per-game custom background file
+            // 1. Per-game custom background file
             string customBg = App.Current.DataModel.GetCustomBackground(profile.Id);
             if (!string.IsNullOrEmpty(customBg) && File.Exists(customBg))
             {
                 Logger.Debug("Using custom background: " + customBg, "BG");
+                if (!IsStillActive()) return;
                 if (BackgroundService.IsVideoFile(customBg))
                     System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(customBg));
                 else
@@ -94,14 +94,29 @@ namespace GenShin_Launcher_Plus.Service
                 return;
             }
 
+            // 2. Legacy global custom background (backward compat)
+            string legacyBg = App.Current.DataModel.BackgroundPath;
+            if (!string.IsNullOrEmpty(legacyBg) && File.Exists(legacyBg))
+            {
+                Logger.Debug("Using legacy background: " + legacyBg, "BG");
+                if (!IsStillActive()) return;
+                if (BackgroundService.IsVideoFile(legacyBg))
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(legacyBg));
+                else
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundImage(legacyBg));
+                return;
+            }
+
             // 3. API backgrounds
             Logger.Debug("Fetching API backgrounds...", "BG");
             var allBgs = await BackgroundService.FetchBackgroundsAsync(profile);
+            if (!IsStillActive()) return;
             Logger.Debug("Fetched " + allBgs.Count + " backgrounds from API", "BG");
 
             if (allBgs.Count == 0)
             {
                 Logger.Warn("No backgrounds returned from API", "BG");
+                if (!IsStillActive()) return;
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                     main.SetBackgroundResource("pack://application:,,,/Images/MainBackground.jpg"));
                 return;
@@ -128,6 +143,7 @@ namespace GenShin_Launcher_Plus.Service
                 }
                 Logger.Debug("  trying bg id=" + bg.Id + " url=" + url, "BG");
                 cacheFile = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id);
+                if (!IsStillActive()) return;
                 if (cacheFile != null)
                 {
                     selected = bg;
@@ -140,6 +156,7 @@ namespace GenShin_Launcher_Plus.Service
             if (cacheFile == null || selected == null)
             {
                 Logger.Warn("All backgrounds failed to cache, using default", "BG");
+                if (!IsStillActive()) return;
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                     main.SetBackgroundResource("pack://application:,,,/Images/MainBackground.jpg"));
                 return;
@@ -152,10 +169,12 @@ namespace GenShin_Launcher_Plus.Service
                 string? themePath = null;
                 if (selected.Theme != null && !string.IsNullOrEmpty(selected.Theme.Url))
                     themePath = await BackgroundService.CacheBackgroundFileAsync(selected.Theme.Url, profile.Id);
+                if (!IsStillActive()) return;
                 // Cache the static fallback image (for when video can't play, e.g. WebM)
                 string? fallbackPath = null;
                 if (selected.Background != null && !string.IsNullOrEmpty(selected.Background.Url))
                     fallbackPath = await BackgroundService.CacheBackgroundFileAsync(selected.Background.Url, profile.Id);
+                if (!IsStillActive()) return;
                 Logger.Debug("Setting VIDEO bg: video=" + cacheFile + " theme=" + themePath + " fallback=" + fallbackPath, "BG");
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                     main.SetBackgroundVideo(cacheFile, themePath, fallbackPath));
@@ -163,6 +182,7 @@ namespace GenShin_Launcher_Plus.Service
             else
             {
                 Logger.Debug("Setting IMAGE background: " + cacheFile, "BG");
+                if (!IsStillActive()) return;
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                     main.SetBackgroundImage(cacheFile));
             }
@@ -186,11 +206,13 @@ namespace GenShin_Launcher_Plus.Service
             {
                 Logger.Info("Game path not configured, running auto-search", "Main");
                 var biz = App.Current.DataModel.ActiveBiz;
-                var found = GameSearchService.FindGamePath(game, biz.Server);
+                var found = GameSearchService.FindGame(game, biz.Server, allowDifferentServer: true);
                 if (found != null)
                 {
-                    Logger.Info("Auto-found game path: " + found, "Main");
-                    App.Current.DataModel.GamePath = found;
+                    var gameBiz = $"{game.Id}_{found.Server}";
+                    Logger.Info($"Auto-found game path: {found.Path} ({gameBiz})", "Main");
+                    App.Current.DataModel.ActiveGameBiz = gameBiz;
+                    App.Current.DataModel.SetGamePath(gameBiz, found.Path);
                     App.Current.DataModel.SaveDataToFile();
                 }
                 else

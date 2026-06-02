@@ -120,14 +120,6 @@ namespace GenShin_Launcher_Plus.Service
         /// </summary>
         public static async Task<List<HoYoGameBackground>> FetchBackgroundsAsync(GameProfile profile, string gameBiz)
         {
-            var result = new List<HoYoGameBackground>();
-            var apiGameId = GetApiGameId(gameBiz);
-            if (apiGameId == null)
-            {
-                Logger.Warn($"Unknown game biz: {gameBiz}", "Background");
-                return result;
-            }
-
             // Check in-memory cache: backgrounds are the same across all servers of a game
             string gameType = profile.Id; // e.g. "genshin", "starrail"
             if (_apiCache.TryGetValue(gameType, out var cached) && cached.Expiry > DateTime.UtcNow)
@@ -136,17 +128,56 @@ namespace GenShin_Launcher_Plus.Service
                 return cached.Backgrounds;
             }
 
+            var candidates = GetBackgroundApiCandidates(profile.Id, gameBiz);
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var tasks = candidates.Select(candidate => FetchBackgroundsFromBizAsync(profile, candidate, cts.Token)).ToList();
+            while (tasks.Count > 0)
+            {
+                var completed = await Task.WhenAny(tasks);
+                tasks.Remove(completed);
+                var (biz, backgrounds) = await completed;
+                if (backgrounds.Count > 0)
+                {
+                    cts.Cancel();
+                    _apiCache[gameType] = (backgrounds, DateTime.UtcNow.Add(ApiCacheDuration));
+                    Logger.Debug($"Using background API {biz}; cached {backgrounds.Count} backgrounds for {gameType}", "Background");
+                    return backgrounds;
+                }
+            }
+
+            Logger.Warn($"No backgrounds found for {gameBiz}", "Background");
+            return new List<HoYoGameBackground>();
+        }
+
+        private static List<string> GetBackgroundApiCandidates(string gameId, string currentGameBiz)
+        {
+            var candidates = new List<string>
+            {
+                $"{gameId}_cn",
+                $"{gameId}_global",
+            };
+            if (!candidates.Contains(currentGameBiz))
+                candidates.Insert(0, currentGameBiz);
+            return candidates.Where(x => GetApiGameId(x) != null).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private static async Task<(string Biz, List<HoYoGameBackground> Backgrounds)> FetchBackgroundsFromBizAsync(GameProfile profile, string gameBiz, System.Threading.CancellationToken ct)
+        {
+            var result = new List<HoYoGameBackground>();
+            var apiGameId = GetApiGameId(gameBiz);
+            if (apiGameId == null)
+            {
+                Logger.Warn($"Unknown game biz: {gameBiz}", "Background");
+                return (gameBiz, result);
+            }
+
             try
             {
                 string? url = BuildApiUrl(gameBiz);
-                if (url == null) return result;
-
-                _httpClient.DefaultRequestHeaders.UserAgent.Clear();
-                _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+                if (url == null) return (gameBiz, result);
 
                 Logger.Debug($"Fetching backgrounds: {url}", "Background");
-                var response = await _httpClient.GetStringAsync(url);
+                var response = await GetStringWithUserAgentAsync(url, ct);
                 using var doc = JsonDocument.Parse(response);
                 var root = doc.RootElement;
 
@@ -189,7 +220,7 @@ namespace GenShin_Launcher_Plus.Service
                     string? infoUrl = BuildGamesApiUrl(gameBiz);
                     if (infoUrl != null)
                     {
-                        var infoResponse = await _httpClient.GetStringAsync(infoUrl);
+                        var infoResponse = await GetStringWithUserAgentAsync(infoUrl, ct);
                         using var infoDoc = JsonDocument.Parse(infoResponse);
                         var infoRoot = infoDoc.RootElement;
                         if (infoRoot.TryGetProperty("data", out var infoData) &&
@@ -232,19 +263,22 @@ namespace GenShin_Launcher_Plus.Service
                     Logger.Warn($"No backgrounds found for {gameBiz}", "Background");
                 }
             }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
                 Logger.Warn($"Failed to fetch backgrounds: {ex.Message}", "Background");
             }
 
-            // Cache the result for this game type (shared across servers)
-            if (result.Count > 0)
-            {
-                _apiCache[gameType] = (result, DateTime.UtcNow.Add(ApiCacheDuration));
-                Logger.Debug($"Cached {result.Count} backgrounds for {gameType}", "Background");
-            }
+            return (gameBiz, result);
+        }
 
-            return result;
+        private static async Task<string> GetStringWithUserAgentAsync(string url, System.Threading.CancellationToken ct)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStringAsync(ct);
         }
 
         /// <summary>
@@ -340,7 +374,10 @@ namespace GenShin_Launcher_Plus.Service
                 // GIF: 47 49 46
                 if (data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46) return ".gif";
                 // RIFF (WebP): 52 49 46 46
-                if (data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46) return ".webp";
+                if (data.Length >= 12 && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46
+                    && data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50) return ".webp";
+                // WebM/Matroska: EBML header 1A 45 DF A3
+                if (data[0] == 0x1A && data[1] == 0x45 && data[2] == 0xDF && data[3] == 0xA3) return ".webm";
                 // ftyp (MP4): at offset 4
                 if (data.Length >= 8 && data[4] == 0x66 && data[5] == 0x74 && data[6] == 0x79 && data[7] == 0x70) return ".mp4";
             }

@@ -72,6 +72,13 @@ namespace GenShin_Launcher_Plus.ViewModels
             UpdateGameCommand = new AsyncRelayCommand(UpdateGameAsync);
             PreDownloadCommand = new AsyncRelayCommand(PreDownloadAsync);
             CancelInstallCommand = new RelayCommand(CancelInstall);
+            languages.PropertyChanged += (_, _) =>
+            {
+                Title = $"{languages.MainTitle} {Application.ResourceAssembly.GetName().Version}";
+                OnPropertyChanged(nameof(ActionButtonText));
+                OnPropertyChanged(nameof(ServerDisplayNames));
+                OnPropertyChanged(nameof(CurrentServerDisplay));
+            };
 
             Title = $"{languages.MainTitle} {Application.ResourceAssembly.GetName().Version}";
             App.Current.DataModel.EXEname(Path.GetFileName(Environment.ProcessPath));
@@ -357,7 +364,7 @@ namespace GenShin_Launcher_Plus.ViewModels
                 string newBizStr = $"{currentBiz.Game}_{newServer}";
                 App.Current.DataModel.ActiveGameBiz = newBizStr;
                 Logger.Info($"Server switched to: {newBizStr}", "App");
-                RefreshGameSelector();
+                RefreshGameSelector(reloadBackground: false);
             }
         }
 
@@ -382,7 +389,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             if (idx >= 0) SelectedGameIndex = idx;
         }
 
-        public void RefreshGameSelector()
+        public void RefreshGameSelector(bool reloadBackground = true)
         {
             OnPropertyChanged(nameof(SelectedGameIndex));
             OnPropertyChanged(nameof(SelectedServerIndex));
@@ -393,7 +400,8 @@ namespace GenShin_Launcher_Plus.ViewModels
             OnPropertyChanged(nameof(CurrentServerDisplay));
             SwitchPort = $"{languages.GameClientStr} : {CurrentServerDisplay}";
             App.Current.NoticeOverAllBase.SwitchPort = SwitchPort;
-            _ = ReloadBackgroundAsync();
+            if (reloadBackground)
+                _ = ReloadBackgroundAsync();
             _ = RefreshGameStateAsync();
         }
 

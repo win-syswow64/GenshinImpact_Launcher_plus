@@ -12,6 +12,8 @@ namespace GenShin_Launcher_Plus.Service
     /// </summary>
     public static class GameSearchService
     {
+        public sealed record GameSearchResult(string Path, string Server);
+
         // Map our IDs to HoYoPlay internal biz codes
         private static string? ToHypGame(string gameId) => gameId switch
         {
@@ -30,22 +32,29 @@ namespace GenShin_Launcher_Plus.Service
         };
 
         public static string? FindGamePath(GameProfile profile, string server)
+            => FindGame(profile, server)?.Path;
+
+        public static GameSearchResult? FindGame(GameProfile profile, string preferredServer, bool allowDifferentServer = false)
         {
             // 1. HYP per-game registry (new launcher, may not exist)
-            string? path = TryHypRegistry(profile.Id, server);
-            if (Validate(path, profile, server)) return path;
+            string? path = TryHypRegistry(profile.Id, preferredServer);
+            var result = Validate(path, profile, preferredServer, allowDifferentServer);
+            if (result != null) return result;
 
             // 2. Launcher directories from Uninstall registry -> scan games/
-            path = TryLauncherGames(profile, server);
-            if (Validate(path, profile, server)) return path;
+            path = TryLauncherGames(profile, preferredServer);
+            result = Validate(path, profile, preferredServer, allowDifferentServer);
+            if (result != null) return result;
 
             // 3. Old game-config registry keys (GameProfile.CnRegistryKey etc.)
-            path = TryGameConfigRegistry(profile, server);
-            if (Validate(path, profile, server)) return path;
+            path = TryGameConfigRegistry(profile, preferredServer);
+            result = Validate(path, profile, preferredServer, allowDifferentServer);
+            if (result != null) return result;
 
             // 4. Common brute-force paths
-            path = TryCommonPaths(profile, server);
-            if (Validate(path, profile, server)) return path;
+            path = TryCommonPaths(profile, preferredServer);
+            result = Validate(path, profile, preferredServer, allowDifferentServer);
+            if (result != null) return result;
 
             return null;
         }
@@ -199,11 +208,55 @@ namespace GenShin_Launcher_Plus.Service
             return null;
         }
 
-        static bool Validate(string? path, GameProfile profile, string server)
+        static GameSearchResult? Validate(string? path, GameProfile profile, string preferredServer, bool allowDifferentServer)
         {
-            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return false;
-            string exe = server is "cn" or "bilibili" ? profile.CnExeName : profile.GlobalExeName;
-            return File.Exists(Path.Combine(path, exe));
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return null;
+
+            var detectedServer = DetectServerFromConfig(path) ?? preferredServer;
+            if (!allowDifferentServer && !string.Equals(detectedServer, preferredServer, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            string exe = detectedServer is "cn" or "bilibili" ? profile.CnExeName : profile.GlobalExeName;
+            if (!File.Exists(Path.Combine(path, exe)))
+            {
+                if (!File.Exists(Path.Combine(path, profile.CnExeName)) &&
+                    !File.Exists(Path.Combine(path, profile.GlobalExeName)))
+                    return null;
+            }
+
+            return new GameSearchResult(path, detectedServer);
+        }
+
+        public static string? DetectServerFromConfig(string gamePath)
+        {
+            try
+            {
+                var configPath = Path.Combine(gamePath, "config.ini");
+                if (!File.Exists(configPath)) return null;
+
+                foreach (var rawLine in File.ReadLines(configPath))
+                {
+                    var line = rawLine.Trim();
+                    if (line.StartsWith("#") || line.StartsWith(";")) continue;
+                    var index = line.IndexOf('=');
+                    if (index <= 0) continue;
+                    var key = line[..index].Trim();
+                    if (!key.Equals("cps", StringComparison.OrdinalIgnoreCase)) continue;
+                    var value = line[(index + 1)..].Trim().Trim('"');
+
+                    if (value.Contains("bilibili", StringComparison.OrdinalIgnoreCase))
+                        return "bilibili";
+                    if (value.Contains("hoyoverse", StringComparison.OrdinalIgnoreCase))
+                        return "global";
+                    if (value.Contains("mihoyo", StringComparison.OrdinalIgnoreCase))
+                        return "cn";
+                }
+            }
+            catch (Exception ex)
+            {
+                GenShin_Launcher_Plus.Helper.Logger.Warn($"Detect server from config failed: {ex.Message}", "Search");
+            }
+            return null;
         }
     }
 }

@@ -442,17 +442,19 @@ namespace GenShin_Launcher_Plus.ViewModels
             var game = App.Current.DataModel.ActiveGame;
             if (game == null) return;
 
-            var path = GameSearchService.FindGamePath(game, biz.Server);
-            if (path != null)
+            var result = GameSearchService.FindGame(game, biz.Server);
+            if (result != null)
             {
-                GamePath = path;
-                App.Current.DataModel.GamePath = path;
+                var gameBiz = $"{game.Id}_{result.Server}";
+                App.Current.DataModel.ActiveGameBiz = gameBiz;
+                GamePath = result.Path;
+                App.Current.DataModel.SetGamePath(gameBiz, result.Path);
                 App.Current.DataModel.SaveDataToFile();
                 App.Current.ThisMainWindow.ViewModel.RefreshGameSelector();
                 // Use LanguageService to get the string with a reliable fallback
                 string msg = LanguageService.Instance.GetString("GameFoundMsg");
                 if (msg == "GameFoundMsg") msg = "\u627E\u5230\u6E38\u620F\u5BA2\u6237\u7AEF\uFF1A{0}";
-                DialogHelper.ShowInfo(string.Format(msg, path), languages.TipsStr);
+                DialogHelper.ShowInfo(string.Format(msg, result.Path), languages.TipsStr);
             }
             else
             {

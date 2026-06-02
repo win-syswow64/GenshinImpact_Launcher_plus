@@ -161,6 +161,12 @@ public class GameInstallService : INotifyPropertyChanged
         try
         {
             Directory.CreateDirectory(installPath);
+            string? hardLinkPath = FindHardLinkSource(gameBiz, installPath);
+            var hardLinkAudioFields = GetInstalledAudioManifestFields(hardLinkPath);
+            if (hardLinkAudioFields.Count > 0)
+                Logger.Info($"Audio manifests selected for hard-link: {string.Join(", ", hardLinkAudioFields)}", "Install");
+            else if (hardLinkPath != null)
+                Logger.Info("Audio manifests selected for hard-link: all (audio directory scan found none)", "Install");
 
             // 1. Branch info
             var branch = await HoYoPlayApiService.GetGameBranchAsync(gameBiz, token);
@@ -168,7 +174,9 @@ public class GameInstallService : INotifyPropertyChanged
 
             // 2. Resolve chunk plan (this downloads + parses manifest, ~20s)
             var plan = await HoYoPlayApiService.ResolveChunkDownloadPlanAsync(gameBiz, branch.Main, installPath, "",
-                status => { StatusText = status; Logger.Debug(status, "Install"); }, token);
+                status => { StatusText = status; Logger.Debug(status, "Install"); }, token,
+                includeAudioManifests: hardLinkPath != null,
+                audioManifestFields: hardLinkAudioFields.Count > 0 ? hardLinkAudioFields : null);
             if (plan == null || plan.Files.Count == 0)
             {
                 Logger.Warn("Chunk plan null, package fallback", "Install");
@@ -198,7 +206,6 @@ public class GameInstallService : INotifyPropertyChanged
             }
 
             // ── Phase 2: Hard link (with MD5 verification, CPU-bound) ──
-            string? hardLinkPath = FindHardLinkSource(gameBiz, installPath);
             int hardLinked = 0;
             if (hardLinkPath != null)
             {
@@ -231,9 +238,7 @@ public class GameInstallService : INotifyPropertyChanged
                 StatusText = $"硬链接完成: {hardLinked}/{hlTotal} 个文件";
             }
 
-            // ── Phase 3: Filter audio + Calculate remaining ──
-            // Audio packs are hard-linked only; never download audio during install.
-            // Users can download specific audio packs from the Settings page.
+            // ── Phase 3: Calculate remaining ──
             var audioGroups = plan.Files.Where(f => !f.IsFinished).GroupBy(f => f.ManifestField);
             foreach (var g in audioGroups)
             {
@@ -241,17 +246,15 @@ public class GameInstallService : INotifyPropertyChanged
                 Logger.Info($"Remaining [{g.Key}]: {g.Count()} files, {FormatBytes(bytes)}", "Install");
             }
 
-            // Defer ALL audio files (keep only "game" base for download)
-            int deferredCount = 0;
-            foreach (var f in plan.Files.Where(f => !f.IsFinished && f.ManifestField != "game" && !string.IsNullOrEmpty(f.ManifestField)))
+            var remainingFiles = plan.Files.Where(f => !f.IsFinished).ToList();
+            var deferredAudioFiles = remainingFiles.Where(f => HoYoPlayApiService.IsAudioManifest(f.ManifestField)).ToList();
+            if (deferredAudioFiles.Count > 0)
             {
-                f.IsFinished = true;
-                deferredCount++;
+                long deferredBytes = deferredAudioFiles.Sum(f => f.Chunks.Sum(c => c.CompressedSize));
+                Logger.Info($"Deferred audio files after hard-link: {deferredAudioFiles.Count} files, {FormatBytes(deferredBytes)}", "Install");
             }
-            if (deferredCount > 0)
-                Logger.Info($"Deferred {deferredCount} audio files (hard-link only, download from Settings)", "Install");
 
-            var toDownload = plan.Files.Where(f => !f.IsFinished).ToList();
+            var toDownload = remainingFiles.Where(f => !HoYoPlayApiService.IsAudioManifest(f.ManifestField)).ToList();
             long remainingBytes = toDownload.Sum(f => f.Chunks.Sum(c => c.CompressedSize));
             int skippedCount = localMatched + hardLinked;
 
@@ -259,7 +262,9 @@ public class GameInstallService : INotifyPropertyChanged
             {
                 State = GameInstallState.Verifying; StatusText = "正在写入配置...";
                 SetGameConfigIni(gameBiz, installPath, plan.Version);
-                State = GameInstallState.Finished; StatusText = "安装完成"; ProgressPercent = 100;
+                State = GameInstallState.Finished;
+                StatusText = deferredAudioFiles.Count > 0 ? "安装完成，部分语音包可在设置中补装" : "安装完成";
+                ProgressPercent = 100;
                 Logger.Info($"Install complete (all skipped): local={localMatched} hardlink={hardLinked}", "Install");
                 return;
             }
@@ -289,7 +294,9 @@ public class GameInstallService : INotifyPropertyChanged
             State = GameInstallState.Verifying; StatusText = "正在写入配置...";
             SetGameConfigIni(gameBiz, installPath, plan.Version);
             CleanupTempFiles(installPath);
-            State = GameInstallState.Finished; StatusText = "安装完成"; ProgressPercent = 100;
+            State = GameInstallState.Finished;
+            StatusText = deferredAudioFiles.Count > 0 ? "安装完成，部分语音包可在设置中补装" : "安装完成";
+            ProgressPercent = 100;
             Logger.Info($"Install: local={localMatched} hardlink={hardLinked} downloaded={dlDone} total={plan.TotalFiles}", "Install");
         }
         catch (OperationCanceledException) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); }
@@ -466,7 +473,7 @@ public class GameInstallService : INotifyPropertyChanged
         var tasks = items.Select(async item =>
         {
             if (ct.IsCancellationRequested) return;
-            await semaphore.WaitAsync(ct);
+            await semaphore.WaitAsync(CancellationToken.None);
             try { if (!ct.IsCancellationRequested) await action(item, ct); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
             catch (Exception ex) { Logger.Warn($"Task error: {ex.Message}", "Install"); errors.Enqueue(ex); }
@@ -797,11 +804,28 @@ public class GameInstallService : INotifyPropertyChanged
         catch { return false; }
     }
 
+    private static HashSet<string> GetInstalledAudioManifestFields(string? installPath)
+    {
+        var fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrEmpty(installPath) || !Directory.Exists(installPath))
+            return fields;
+
+        foreach (var pack in GetAudioPackStatus(installPath))
+        {
+            if (pack.IsInstalled && HoYoPlayApiService.IsAudioManifest(pack.Field))
+                fields.Add(pack.Field);
+        }
+
+        return fields;
+    }
+
     private string? FindHardLinkSource(string gameBiz, string installPath)
     {
         try
         {
             var game = new GameBiz(gameBiz).Game;
+            var profile = GameProfiles.FindById(game);
+            if (profile == null) return null;
             var root = Path.GetPathRoot(installPath);
             if (string.IsNullOrEmpty(root)) return null;
             if (!new DriveInfo(root).DriveFormat.Equals("NTFS", StringComparison.OrdinalIgnoreCase)) return null;
@@ -809,12 +833,21 @@ public class GameInstallService : INotifyPropertyChanged
             foreach (var s in new[] { "cn", "global", "bilibili" })
             {
                 var other = $"{game}_{s}"; if (other == gameBiz) continue;
-                var p = App.Current.DataModel.GetGamePath(other);
+                var p = App.Current.DataModel.GetExactGamePath(other);
+                if (string.IsNullOrEmpty(p) || !Directory.Exists(p))
+                    p = GameSearchService.FindGame(profile, s)?.Path;
                 if (string.IsNullOrEmpty(p) || !Directory.Exists(p) || Path.GetPathRoot(p) != root) continue;
+                if (Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .Equals(Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)) continue;
+                var detectedServer = GameSearchService.DetectServerFromConfig(p);
+                if (!string.IsNullOrEmpty(detectedServer) && !string.Equals(detectedServer, s, StringComparison.OrdinalIgnoreCase)) continue;
+                var exe = profile.GetExeName(new GameBiz(other));
+                if (!File.Exists(Path.Combine(p, exe))) continue;
                 var v = GameStateService.GetLocalVersion(p);
                 if (v != null && (best == null || v > best)) { best = v; bestPath = p; }
             }
             if (bestPath != null) Logger.Info($"Hard link source: {bestPath}", "Install");
+            else Logger.Info($"Hard link source not found for {gameBiz}", "Install");
             return bestPath;
         }
         catch { return null; }
@@ -831,9 +864,9 @@ public class GameInstallService : INotifyPropertyChanged
                 { if (line.StartsWith("[") || string.IsNullOrWhiteSpace(line)) continue; var i = line.IndexOf('='); if (i > 0) d[line[..i].Trim()] = line[(i + 1)..].Trim(); }
             d["game_version"] = version ?? "";
             var srv = new GameBiz(gameBiz).Server;
-            if (srv == "cn") { d["channel"] = "1"; d["sub_channel"] = "1"; d["cps"] = "hyp_mihoyo"; }
-            else if (srv == "global") { d["channel"] = "1"; d["sub_channel"] = "0"; d["cps"] = "hyp_hoyoverse"; }
-            else if (srv == "bilibili") { d["channel"] = "14"; d["sub_channel"] = "0"; d["cps"] = "hyp_mihoyo"; }
+            if (srv == "cn") { d["channel"] = "1"; d["sub_channel"] = "1"; d["cps"] = "mihoyo"; }
+            else if (srv == "global") { d["channel"] = "1"; d["sub_channel"] = "0"; d["cps"] = "hoyoverse"; }
+            else if (srv == "bilibili") { d["channel"] = "14"; d["sub_channel"] = "0"; d["cps"] = "bilibili"; }
             d["game_biz"] = HoYoPlayGameMap.ToHoYoPlayBiz(gameBiz);
             var sb = new StringBuilder(); sb.AppendLine("[General]");
             foreach (var kv in d) sb.AppendLine($"{kv.Key}={kv.Value}");
@@ -885,7 +918,7 @@ public class GameInstallService : INotifyPropertyChanged
 
             // Resolve plan but only keep files from the target audio manifest
             var plan = await HoYoPlayApiService.ResolveChunkDownloadPlanAsync(gameBiz, branch.Main, installPath, "",
-                status => { StatusText = status; }, token);
+                status => { StatusText = status; }, token, includeAudioManifests: true);
             if (plan == null) { State = GameInstallState.Error; ErrorText = "无法获取清单"; return; }
 
             // Keep only files from the target audio manifest
@@ -900,7 +933,7 @@ public class GameInstallService : INotifyPropertyChanged
             {
                 var otherBiz = $"{game}_{server}";
                 if (otherBiz == gameBiz) continue;
-                var otherPath = App.Current.DataModel.GetGamePath(otherBiz);
+                var otherPath = App.Current.DataModel.GetExactGamePath(otherBiz);
                 if (string.IsNullOrEmpty(otherPath) || !Directory.Exists(otherPath)) continue;
                 if (Path.GetPathRoot(otherPath) != root) continue;
 
@@ -941,7 +974,7 @@ public class GameInstallService : INotifyPropertyChanged
             {
                 var otherBiz = $"{game}_{server}";
                 if (otherBiz == gameBiz) continue;
-                var otherPath = App.Current.DataModel.GetGamePath(otherBiz);
+                var otherPath = App.Current.DataModel.GetExactGamePath(otherBiz);
                 if (string.IsNullOrEmpty(otherPath) || !Directory.Exists(otherPath)) continue;
                 if (Path.GetPathRoot(otherPath) != root) continue;
                 foreach (var file in toDownload)
@@ -979,8 +1012,13 @@ public class GameInstallService : INotifyPropertyChanged
             foreach (var dataDir in new[] { "YuanShen_Data", "GenshinImpact_Data", "StarRail_Data", "ZenlessZoneZero_Data" })
             {
                 var audioPath = Path.Combine(installPath, dataDir, "StreamingAssets", "AudioAssets", folder);
-                if (Directory.Exists(audioPath) && Directory.GetFiles(audioPath, "*", SearchOption.TopDirectoryOnly).Length > 0)
-                { installed = true; break; }
+                if (!Directory.Exists(audioPath)) continue;
+                try
+                {
+                    if (Directory.EnumerateFiles(audioPath, "*", SearchOption.AllDirectories).Any())
+                    { installed = true; break; }
+                }
+                catch { }
             }
             result.Add(new AudioPackInfo { Field = field, DisplayName = field, IsInstalled = installed });
         }

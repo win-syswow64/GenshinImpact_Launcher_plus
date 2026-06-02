@@ -37,13 +37,13 @@ namespace GenShin_Launcher_Plus.Core
                 }
             }
 
-            string biz = cps switch
-            {
-                "mihoyo" => $"{game}_cn",
-                "bilibili" => $"{game}_bilibili",
-                "hoyoverse" => $"{game}_global",
-                _ => $"{game}_cn",
-            };
+            string biz;
+            if (cps.Contains("bilibili", StringComparison.OrdinalIgnoreCase))
+                biz = $"{game}_bilibili";
+            else if (cps.Contains("hoyoverse", StringComparison.OrdinalIgnoreCase))
+                biz = $"{game}_global";
+            else
+                biz = $"{game}_cn";
 
             parser.AddSetting("setup", "ActiveGameBiz", biz);
 
@@ -144,6 +144,11 @@ namespace GenShin_Launcher_Plus.Core
 
             // Fall back to global path
             return parser.GetSetting("setup", "GamePath", 0);
+        }
+
+        public string GetExactGamePath(string gameBiz)
+        {
+            return parser.GetSetting(gameBiz, "GamePath", 0);
         }
 
         public void SetGamePath(string gameBiz, string path)

@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:ctrl="clr-namespace:GenShin_Launcher_Plus.Controls"
+        xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         mc:Ignorable="d"
         MouseLeftButtonDown="WindowDragMove"
         d:Height="730" d:Width="1280"
@@ -13,7 +14,7 @@
         AllowsTransparency="True"
         Background="Transparent"
         Title="原神启动器Plus">
-    <Border CornerRadius="8" ClipToBounds="True" Background="#202020">
+    <Border x:Name="RootChrome" CornerRadius="8" ClipToBounds="True" Background="#202020">
         <Grid x:Name="MainGrid">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -27,6 +28,7 @@
             <!-- Background layers -->
             <Image x:Name="BackgroundImage" Stretch="UniformToFill" Grid.RowSpan="2" Grid.ColumnSpan="2" Source="/Images/MainBackground.jpg"/>
             <MediaElement x:Name="BackgroundVideo" Stretch="UniformToFill" Grid.RowSpan="2" Grid.ColumnSpan="2" LoadedBehavior="Manual" UnloadedBehavior="Stop" IsMuted="True" Opacity="0" MediaOpened="MediaElement_Opened" MediaFailed="MediaElement_Failed" MediaEnded="MediaElement_Ended"/>
+            <vlc:VideoView x:Name="VlcVideoView" Grid.RowSpan="2" Grid.ColumnSpan="2" Opacity="0"/>
             <Image x:Name="VideoFrameImage" Stretch="UniformToFill" Grid.RowSpan="2" Grid.ColumnSpan="2" Opacity="0"/>
             <Image x:Name="VideoOverlayImage" Stretch="UniformToFill" Grid.RowSpan="2" Grid.ColumnSpan="2" Opacity="0"/>
 

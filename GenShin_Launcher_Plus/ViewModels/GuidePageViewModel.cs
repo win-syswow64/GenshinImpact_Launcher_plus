@@ -63,11 +63,13 @@ namespace GenShin_Launcher_Plus.ViewModels
             var game = App.Current.DataModel.ActiveGame;
             if (game == null) return;
 
-            var path = GameSearchService.FindGamePath(game, biz.Server);
-            if (path != null)
+            var result = GameSearchService.FindGame(game, biz.Server);
+            if (result != null)
             {
-                GamePath = path;
-                App.Current.DataModel.GamePath = path;
+                var gameBiz = $"{game.Id}_{result.Server}";
+                GamePath = result.Path;
+                App.Current.DataModel.ActiveGameBiz = gameBiz;
+                App.Current.DataModel.SetGamePath(gameBiz, result.Path);
                 App.Current.DataModel.SaveDataToFile();
                 App.Current.DataModel = new DataModel();
                 var mainWindow = new MainWindow();

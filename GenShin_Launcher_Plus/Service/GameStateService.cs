@@ -42,6 +42,10 @@ public static class GameStateService
     {
         if (string.IsNullOrEmpty(installPath) || !Directory.Exists(installPath))
             return false;
+        var detectedServer = GameSearchService.DetectServerFromConfig(installPath);
+        if (!string.IsNullOrEmpty(detectedServer) &&
+            !string.Equals(detectedServer, biz.Server, StringComparison.OrdinalIgnoreCase))
+            return false;
         var exe = profile.GetExeName(biz);
         return File.Exists(Path.Combine(installPath, exe));
     }

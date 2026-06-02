@@ -6,6 +6,8 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using GenShin_Launcher_Plus.ViewModels;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using GenShin_Launcher_Plus.Helper;
 using LibVLCSharp.Shared;
@@ -33,6 +35,12 @@ namespace GenShin_Launcher_Plus
             if (cfgH <= 0) cfgH = screenH * 0.5;
             Width = cfgW;
             Height = cfgH;
+
+            LocationChanged += (_, _) => SyncExternalVlcBackground();
+            SizeChanged += (_, _) => SyncExternalVlcBackground();
+            StateChanged += (_, _) => SyncExternalVlcBackground();
+            Activated += (_, _) => SyncExternalVlcBackground();
+            Closed += (_, _) => CloseExternalVlcBackground();
         }
 
         private void WindowDragMove(object sender, MouseButtonEventArgs e)
@@ -79,23 +87,14 @@ namespace GenShin_Launcher_Plus
 
         public void SetBackgroundImage(string filePath)
         {
+            var requestId = Interlocked.Increment(ref _backgroundRequestId);
             try
             {
                 StopVideoPlayback();
+                RestoreRootBackground();
                 if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                 {
-                    BitmapSource bitmap = WebPHelper.LoadImage(filePath);
-                    if (bitmap != null)
-                    {
-                        BackgroundImage.Source = bitmap;
-                        BackgroundImage.Opacity = 1;
-                        Logger.Debug("BackgroundImage set OK (" + bitmap.PixelWidth + "x" + bitmap.PixelHeight + ")", "BG");
-                    }
-                    else
-                    {
-                        Logger.Warn("WebPHelper returned null for: " + filePath + ", using default", "BG");
-                        SetBackgroundResource("pack://application:,,,/Images/MainBackground.jpg");
-                    }
+                    _ = SetBackgroundImageAsync(filePath, requestId);
                 }
             }
             catch (Exception ex)
@@ -105,30 +104,121 @@ namespace GenShin_Launcher_Plus
             }
         }
 
-        public void SetBackgroundResource(string uriString)
+        private async Task SetBackgroundImageAsync(string filePath, long requestId)
         {
             try
             {
+                BitmapSource? bitmap = await Task.Run(() => WebPHelper.LoadImage(filePath));
+                if (requestId != Volatile.Read(ref _backgroundRequestId)) return;
+
+                if (bitmap != null)
+                {
+                    BackgroundImage.Source = bitmap;
+                    BackgroundImage.Opacity = 1;
+                    Logger.Debug("BackgroundImage set OK (" + bitmap.PixelWidth + "x" + bitmap.PixelHeight + ")", "BG");
+                }
+                else
+                {
+                    Logger.Warn("WebPHelper returned null for: " + filePath + ", using default", "BG");
+                    SetBackgroundResource("pack://application:,,,/Images/MainBackground.jpg");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (requestId == Volatile.Read(ref _backgroundRequestId))
+                {
+                    Logger.Warn("Failed to load background image: " + ex.Message, "BG");
+                    SetBackgroundResource("pack://application:,,,/Images/MainBackground.jpg");
+                }
+            }
+        }
+
+        public void SetBackgroundResource(string uriString)
+        {
+            Interlocked.Increment(ref _backgroundRequestId);
+            try
+            {
                 StopVideoPlayback();
+                RestoreRootBackground();
                 BackgroundImage.Source = new BitmapImage(new Uri(uriString, UriKind.RelativeOrAbsolute));
                 BackgroundImage.Opacity = 1;
             }
             catch { }
         }
 
+        public void SetBackgroundVideo(string videoPath, string? overlayImagePath = null, string? fallbackImagePath = null)
+        {
+            Interlocked.Increment(ref _backgroundRequestId);
+            try
+            {
+                StopVideoPlayback();
+                if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
+                {
+                    if (!string.IsNullOrEmpty(fallbackImagePath)) SetBackgroundImage(fallbackImagePath);
+                    return;
+                }
+                _videoFallbackPath = fallbackImagePath;
+                _lastVideoPath = videoPath;
+                _videoUsingMediaElement = false;
+                _mediaElementFailed = false;
+
+                // Load theme overlay (WebP) on top of video
+                if (!string.IsNullOrEmpty(overlayImagePath) && File.Exists(overlayImagePath))
+                {
+                    var overlay = WebPHelper.LoadImage(overlayImagePath);
+                    if (overlay != null)
+                    {
+                        VideoOverlayImage.Source = overlay;
+                        VideoOverlayImage.Opacity = 1;
+                    }
+                }
+
+                var ext = Path.GetExtension(videoPath).ToLowerInvariant();
+                if (ext is ".webm" or ".mkv")
+                {
+                    Logger.Debug("Using external VLC background for " + ext + ": " + videoPath, "BG");
+                    PlayExternalVlcBackground(videoPath, fallbackImagePath);
+                    return;
+                }
+
+                // Try WPF MediaElement first (GPU-accelerated via Media Foundation + DXVA2)
+                RestoreRootBackground();
+                BackgroundImage.Opacity = 0;
+                _videoUsingMediaElement = true;
+                Logger.Debug("Trying MediaElement (GPU): " + videoPath, "BG");
+                BackgroundVideo.Source = new Uri(videoPath, UriKind.Absolute);
+                BackgroundVideo.Play();
+                BackgroundVideo.Opacity = 1;
+
+                // If MediaElement fails, MediaElement_Failed will trigger VLC fallback
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("SetBackgroundVideo exception: " + ex.Message, "BG");
+                FallbackToVlcOrStatic(videoPath, fallbackImagePath);
+            }
+        }
+
         // ==================== Background: Video (LibVLCSharp software rendering) ====================
 
         private LibVLC? _libVLC;
         private LibVLCSharp.Shared.MediaPlayer? _vlcPlayer;
+        private VlcBackgroundWindow? _vlcBackgroundWindow;
+        private bool _usingExternalVlcBackground;
         private string? _videoFallbackPath;
         private WriteableBitmap? _videoBitmap;
-        // WriteableBitmap requires UI thread access, synchronized via Dispatcher
+        private long _backgroundRequestId;
+        private IntPtr _preLockedBuffer;
+        private IntPtr _vlcFallbackBuffer;
+        private int _vlcFallbackBufferSize;
+        private int _vlcFramePending;
+        private long _lastVlcFrameTick;
 
         private LibVLC GetOrCreateLibVLC()
         {
             if (_libVLC == null)
             {
-                _libVLC = new LibVLC("--no-video-title-show", "--quiet", "--no-stats");
+                _libVLC = new LibVLC("--no-video-title-show", "--quiet", "--no-stats", "--avcodec-hw=any", "--drop-late-frames", "--skip-frames", "--file-caching=1000");
                 Logger.Debug("LibVLC initialized: " + _libVLC.Version, "BG");
             }
             return _libVLC;
@@ -141,30 +231,98 @@ namespace GenShin_Launcher_Plus
         {
             try
             {
+                _videoUsingMediaElement = false;
+                _mediaElementFailed = false;
+                StopExternalVlcBackground();
+
                 // Stop MediaElement (safe, UI thread)
+                try { BackgroundVideo.Stop(); } catch { }
                 BackgroundVideo.Source = null;
                 BackgroundVideo.Opacity = 0;
+                VlcVideoView.MediaPlayer = null;
+                VlcVideoView.Opacity = 0;
 
-                // Stop VLC: signal callbacks to skip, then stop/dispose on background thread
-                if (_vlcPlayer != null)
+                // Stop VLC: signal callbacks to skip before disposing the player.
+                var player = _vlcPlayer;
+                if (player != null)
                 {
                     _vlcStopping = true;
-                    _vlcPlayer.EndReached -= VlcPlayer_EndReached;
-                    _vlcPlayer.EncounteredError -= VlcPlayer_Error;
-                    var player = _vlcPlayer;
                     _vlcPlayer = null;
-                    // Dispose on background thread to avoid deadlock with VLC callbacks
-                    Task.Run(() =>
-                    {
-                        try { player.Stop(); } catch { }
-                        try { player.Dispose(); } catch { }
-                    });
+                    player.EndReached -= VlcPlayer_EndReached;
+                    player.EncounteredError -= VlcPlayer_Error;
+                    // Dispose on background thread to avoid deadlock with VLC callbacks.
+                    Task.Run(() => { try { player.Stop(); } catch { } try { player.Dispose(); } catch { } });
                 }
                 _videoBitmap = null;
+                _preLockedBuffer = IntPtr.Zero;
+                _vlcFramePending = 0;
                 VideoFrameImage.Source = null;
                 VideoFrameImage.Opacity = 0;
                 VideoOverlayImage.Opacity = 0;
-                _vlcStopping = false;
+            }
+            catch { }
+        }
+
+        private void RestoreRootBackground()
+        {
+            RootChrome.Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20));
+        }
+
+        private void PlayExternalVlcBackground(string videoPath, string? fallbackPath)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
+                {
+                    if (!string.IsNullOrEmpty(fallbackPath)) SetBackgroundImage(fallbackPath);
+                    return;
+                }
+
+                BackgroundVideo.Source = null;
+                BackgroundVideo.Opacity = 0;
+                VlcVideoView.MediaPlayer = null;
+                VlcVideoView.Opacity = 0;
+                VideoFrameImage.Source = null;
+                VideoFrameImage.Opacity = 0;
+                BackgroundImage.Opacity = 0;
+                RootChrome.Background = Brushes.Transparent;
+
+                _usingExternalVlcBackground = true;
+                _vlcBackgroundWindow ??= new VlcBackgroundWindow();
+                _vlcBackgroundWindow.Play(GetOrCreateLibVLC(), videoPath);
+                SyncExternalVlcBackground();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("External VLC background failed: " + ex.Message, "BG");
+                StopExternalVlcBackground();
+                RestoreRootBackground();
+                if (!string.IsNullOrEmpty(fallbackPath)) SetBackgroundImage(fallbackPath);
+            }
+        }
+
+        private void StopExternalVlcBackground()
+        {
+            _usingExternalVlcBackground = false;
+            try { _vlcBackgroundWindow?.StopAndHide(); } catch { }
+        }
+
+        private void CloseExternalVlcBackground()
+        {
+            try
+            {
+                _vlcBackgroundWindow?.Close();
+                _vlcBackgroundWindow = null;
+            }
+            catch { }
+        }
+
+        private void SyncExternalVlcBackground()
+        {
+            try
+            {
+                if (_usingExternalVlcBackground)
+                    _vlcBackgroundWindow?.SyncBehind(this);
             }
             catch { }
         }
@@ -200,131 +358,58 @@ namespace GenShin_Launcher_Plus
                 Logger.Warn("MediaElement failed: " + e.ErrorException?.Message + ", using VLC", "BG");
             BackgroundVideo.Source = null;
             BackgroundVideo.Opacity = 0;
-            FallbackToVlcOrStatic(
-                _videoFallbackPath != null ? (_lastVideoPath ?? "") : "",
-                _videoFallbackPath);
+            FallbackToVlcOrStatic(_lastVideoPath ?? "", _videoFallbackPath);
         }
 
         private string? _lastVideoPath;
 
-        public void SetBackgroundVideo(string videoPath, string? overlayImagePath = null, string? fallbackImagePath = null)
+        private void FallbackToVlcOrStatic(string videoPath, string? fallbackPath)
         {
-            try
-            {
-                StopVideoPlayback();
-                if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
-                {
-                    if (!string.IsNullOrEmpty(fallbackImagePath)) SetBackgroundImage(fallbackImagePath);
-                    return;
-                }
-                _videoFallbackPath = fallbackImagePath;
-                _lastVideoPath = videoPath;
-                _videoUsingMediaElement = false;
-                _mediaElementFailed = false;
-
-                // Load theme overlay (WebP) on top of video
-                if (!string.IsNullOrEmpty(overlayImagePath) && File.Exists(overlayImagePath))
-                {
-                    var overlay = WebPHelper.LoadImage(overlayImagePath);
-                    if (overlay != null)
-                    {
-                        VideoOverlayImage.Source = overlay;
-                        VideoOverlayImage.Opacity = 1;
-                    }
-                }
-
-                // Try WPF MediaElement first (GPU-accelerated via Media Foundation + DXVA2)
-                BackgroundImage.Opacity = 0;
-                _videoUsingMediaElement = true;
-                Logger.Debug("Trying MediaElement (GPU): " + videoPath, "BG");
-                BackgroundVideo.Source = new Uri(videoPath, UriKind.Absolute);
-                BackgroundVideo.Play();
-                BackgroundVideo.Opacity = 1;
-
-                // If MediaElement fails, MediaElement_Failed will trigger VLC fallback
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("SetBackgroundVideo exception: " + ex.Message, "BG");
-                FallbackToVlcOrStatic(videoPath, fallbackImagePath);
-            }
+            Logger.Debug("Falling back to external VLC background", "BG");
+            PlayExternalVlcBackground(videoPath, fallbackPath);
         }
 
-        private void FallbackToVlcOrStatic(string videoPath, string fallbackPath)
-        {
-            // Try VLC software rendering
-            try
-            {
-                Logger.Debug("Falling back to VLC software render", "BG");
-                var vlc = GetOrCreateLibVLC();
-                _vlcPlayer = new LibVLCSharp.Shared.MediaPlayer(vlc);
-                _vlcPlayer.EndReached += VlcPlayer_EndReached;
-                _vlcPlayer.EncounteredError += VlcPlayer_Error;
-                _vlcPlayer.SetVideoCallbacks(
-                    new LibVLCSharp.Shared.MediaPlayer.LibVLCVideoLockCb(VlcLock),
-                    new LibVLCSharp.Shared.MediaPlayer.LibVLCVideoUnlockCb(VlcUnlock),
-                    new LibVLCSharp.Shared.MediaPlayer.LibVLCVideoDisplayCb(VlcDisplay));
-                _vlcPlayer.SetVideoFormatCallbacks(
-                    new LibVLCSharp.Shared.MediaPlayer.LibVLCVideoFormatCb(VlcFormat),
-                    null);
-                BackgroundImage.Opacity = 0;
-                using var media = new Media(vlc, new Uri(videoPath));
-                _vlcPlayer.Play(media);
-                Logger.Debug("VLC software playback started", "BG");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("VLC fallback also failed: " + ex.Message, "BG");
-                StopVideoPlayback();
-                if (!string.IsNullOrEmpty(fallbackPath)) SetBackgroundImage(fallbackPath);
-            }
-        }
-
-        // VLC video callbacks for software rendering (IntPtr-based delegates)
-        // VLC callbacks: Lock/Unlock MUST run on UI thread (WriteableBitmap requirement)
-        private System.Threading.ManualResetEventSlim _lockReady = new(false);
-        private IntPtr _currentBackBuffer;
+        // VLC video callbacks for software rendering (IntPtr-based delegates).
+        // VlcFormat and VlcUnlock pre-lock on the UI thread, VlcLock only swaps the pointer.
         private volatile bool _vlcStopping;
 
         private IntPtr VlcLock(IntPtr opaque, IntPtr planes)
         {
-            if (_vlcStopping) return IntPtr.Zero;
-            _lockReady.Reset();
-            try
+            IntPtr buffer = IntPtr.Zero;
+            for (int i = 0; i < 200 && !_vlcStopping; i++)
             {
-                Dispatcher.BeginInvoke(() =>
-                {
-                    if (_vlcStopping || _videoBitmap == null) { _lockReady.Set(); return; }
-                    try
-                    {
-                        _videoBitmap.Lock();
-                        _currentBackBuffer = _videoBitmap.BackBuffer;
-                    }
-                    catch { _currentBackBuffer = IntPtr.Zero; }
-                    _lockReady.Set();
-                });
-                _lockReady.Wait(200); // timeout to avoid deadlock during shutdown
+                buffer = Interlocked.Exchange(ref _preLockedBuffer, IntPtr.Zero);
+                if (buffer != IntPtr.Zero) break;
+                Thread.Sleep(1);
             }
-            catch { }
-            unsafe { ((IntPtr*)planes.ToPointer())[0] = _currentBackBuffer; }
+            if (buffer == IntPtr.Zero)
+                buffer = _vlcFallbackBuffer;
+            unsafe { if (planes != IntPtr.Zero) ((IntPtr*)planes.ToPointer())[0] = buffer; }
             return IntPtr.Zero;
         }
 
         private void VlcUnlock(IntPtr opaque, IntPtr picture, IntPtr planes)
         {
-            // Dispatch Unlock() to UI thread (async to avoid blocking VLC)
+            if (_vlcStopping) return;
+            if (Interlocked.Exchange(ref _vlcFramePending, 1) == 1) return;
             Dispatcher.BeginInvoke(() =>
             {
-                if (_videoBitmap != null)
+                try
                 {
-                    try
+                    if (_vlcStopping || _videoBitmap == null) return;
+                    var now = Environment.TickCount64;
+                    if (now - _lastVlcFrameTick >= 33)
                     {
                         _videoBitmap.AddDirtyRect(new System.Windows.Int32Rect(
                             0, 0, _videoBitmap.PixelWidth, _videoBitmap.PixelHeight));
-                        _videoBitmap.Unlock();
+                        _lastVlcFrameTick = now;
                     }
-                    catch { }
+                    _videoBitmap.Unlock();
+                    _videoBitmap.Lock();
+                    Interlocked.Exchange(ref _preLockedBuffer, _videoBitmap.BackBuffer);
                 }
+                catch { Interlocked.Exchange(ref _preLockedBuffer, IntPtr.Zero); }
+                finally { Interlocked.Exchange(ref _vlcFramePending, 0); }
             });
         }
 
@@ -333,8 +418,14 @@ namespace GenShin_Launcher_Plus
             // Frame already committed in VlcUnlock
         }
 
+        private void VlcCleanup(ref IntPtr opaque)
+        {
+            Interlocked.Exchange(ref _preLockedBuffer, IntPtr.Zero);
+        }
+
         private uint VlcFormat(ref IntPtr opaque, IntPtr chroma, ref uint width, ref uint height, ref uint pitches, ref uint lines)
         {
+            if (_vlcStopping) return 0;
             unsafe
             {
                 byte* c = (byte*)chroma.ToPointer();
@@ -346,14 +437,27 @@ namespace GenShin_Launcher_Plus
             int w = (int)width, h = (int)height;
             Dispatcher.Invoke(() =>
             {
+                EnsureVlcFallbackBuffer(w, h);
                 _videoBitmap = new WriteableBitmap(w, h, 96, 96,
                     System.Windows.Media.PixelFormats.Bgra32, null);
+                _videoBitmap.Lock();
+                Interlocked.Exchange(ref _preLockedBuffer, _videoBitmap.BackBuffer);
                 VideoFrameImage.Source = _videoBitmap;
                 VideoFrameImage.Opacity = 1;
             });
 
             Logger.Debug("VLC format: " + w + "x" + h + " BGRA", "BG");
             return 1;
+        }
+
+        private void EnsureVlcFallbackBuffer(int width, int height)
+        {
+            var required = checked(width * height * 4);
+            if (_vlcFallbackBuffer != IntPtr.Zero && _vlcFallbackBufferSize >= required) return;
+
+            _vlcFallbackBuffer = Marshal.AllocHGlobal(required);
+            _vlcFallbackBufferSize = required;
+            unsafe { new Span<byte>(_vlcFallbackBuffer.ToPointer(), required).Clear(); }
         }
 
         private void VlcPlayer_EndReached(object? sender, EventArgs e)
@@ -366,6 +470,7 @@ namespace GenShin_Launcher_Plus
                     if (_vlcPlayer != null && _libVLC != null && _lastVideoPath != null)
                     {
                         var media = new Media(_libVLC, new Uri(_lastVideoPath));
+                        _vlcStopping = false;
                         _vlcPlayer.Play(media);
                         media.Dispose();
                     }

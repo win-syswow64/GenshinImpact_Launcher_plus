@@ -187,7 +187,8 @@ public static class HoYoPlayApiService
     public static async Task<ChunkDownloadPlan?> ResolveChunkDownloadPlanAsync(
         string gameBiz, GameBranchPackageInfo branchPackage, string installPath,
         string localVersionTag = "", Action<string>? statusCallback = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool includeAudioManifests = false,
+        IReadOnlySet<string>? audioManifestFields = null)
     {
         var plan = new ChunkDownloadPlan { GameBiz = gameBiz, InstallPath = installPath };
 
@@ -208,6 +209,19 @@ public static class HoYoPlayApiService
         foreach (var manifest in sophonBuild.Manifests)
         {
             var mf = manifest.MatchingField;
+            if (IsAudioManifest(mf))
+            {
+                if (!includeAudioManifests)
+                {
+                    Logger.Debug($"Skipping audio manifest: {mf}", "Sophon");
+                    continue;
+                }
+                if (audioManifestFields is { Count: > 0 } && !audioManifestFields.Contains(mf ?? ""))
+                {
+                    Logger.Debug($"Skipping unselected audio manifest: {mf}", "Sophon");
+                    continue;
+                }
+            }
 
             manifestIndex++;
             statusCallback?.Invoke($"正在解析清单 ({manifestIndex}/{manifestTotal}): {mf}...");
@@ -279,6 +293,11 @@ public static class HoYoPlayApiService
         var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
         return fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? fullPath : null;
     }
+
+    public static bool IsAudioManifest(string? matchingField)
+        => !string.IsNullOrEmpty(matchingField)
+           && matchingField.Contains('-')
+           && matchingField.Length is 5 or 10;
 }
 
 // === Download plan models ===

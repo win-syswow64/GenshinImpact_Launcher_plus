@@ -68,11 +68,7 @@ namespace GenShin_Launcher_Plus.Services
             var fullPath = Path.GetFullPath(LangDir);
             Logger.Debug($"Scanning: {fullPath}", "Lang");
 
-            // Auto-extract bundled languages if Lang folder is missing or empty
-            if (!Directory.Exists(LangDir) || Directory.GetFiles(LangDir, "*.json").Length == 0)
-            {
-                ExtractDefaultLanguages();
-            }
+            EnsureDefaultLanguageKeys();
 
             if (!Directory.Exists(LangDir))
             {
@@ -111,11 +107,7 @@ namespace GenShin_Launcher_Plus.Services
             Logger.Info($"Available languages: {AvailableLanguages.Count}", "Lang");
         }
 
-        /// <summary>
-        /// Extracts bundled language JSON files from embedded resources to the Lang directory.
-        /// Only extracts files that don't already exist on disk, so user modifications are preserved.
-        /// </summary>
-        private void ExtractDefaultLanguages()
+        private void EnsureDefaultLanguageKeys()
         {
             try
             {
@@ -129,12 +121,6 @@ namespace GenShin_Launcher_Plus.Services
                     var fileName = resourceName.Substring(EmbeddedResourcePrefix.Length);
                     var filePath = Path.Combine(LangDir, fileName);
 
-                    // Always overwrite to pick up new keys from rebuilt assembly
-                    if (File.Exists(filePath))
-                    {
-                        Logger.Debug($"Overwriting: {fileName}", "Lang");
-                    }
-
                     using var stream = assembly.GetManifestResourceStream(resourceName);
                     if (stream == null)
                     {
@@ -144,13 +130,37 @@ namespace GenShin_Launcher_Plus.Services
 
                     using var reader = new StreamReader(stream);
                     var content = reader.ReadToEnd();
-                    File.WriteAllText(filePath, content);
-                    Logger.Info($"Extracted default language: {fileName}", "Lang");
+                    var bundled = JsonConvert.DeserializeObject<Dictionary<string, string>>(content);
+                    if (bundled == null) continue;
+
+                    if (!File.Exists(filePath))
+                    {
+                        File.WriteAllText(filePath, content);
+                        Logger.Info($"Extracted default language: {fileName}", "Lang");
+                        continue;
+                    }
+
+                    var existing = LoadJsonDictionary(filePath);
+                    var changed = false;
+                    foreach (var kv in bundled)
+                    {
+                        if (!existing.ContainsKey(kv.Key))
+                        {
+                            existing[kv.Key] = kv.Value;
+                            changed = true;
+                        }
+                    }
+
+                    if (changed)
+                    {
+                        File.WriteAllText(filePath, JsonConvert.SerializeObject(existing, Formatting.Indented));
+                        Logger.Info($"Merged missing language keys: {fileName}", "Lang");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Logger.Error($"Failed to extract default languages: {ex.Message}", "Lang");
+                Logger.Error($"Failed to ensure default languages: {ex.Message}", "Lang");
             }
         }
 
@@ -201,8 +211,7 @@ namespace GenShin_Launcher_Plus.Services
             }
             try
             {
-                var json = File.ReadAllText(path);
-                var data = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+                var data = LoadJsonDictionary(path);
                 Logger.Debug($"Loaded {Path.GetFileName(path)}: {data?.Count ?? 0} entries", "Lang");
                 return data ?? new Dictionary<string, string>();
             }
@@ -211,6 +220,12 @@ namespace GenShin_Launcher_Plus.Services
                 Logger.Error($"Failed to parse {Path.GetFileName(path)}: {ex.Message}", "Lang");
                 return new Dictionary<string, string>();
             }
+        }
+
+        private static Dictionary<string, string> LoadJsonDictionary(string path)
+        {
+            var json = File.ReadAllText(path);
+            return JsonConvert.DeserializeObject<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
         }
 
         private void ApplyToModel(LanguageModel model)
