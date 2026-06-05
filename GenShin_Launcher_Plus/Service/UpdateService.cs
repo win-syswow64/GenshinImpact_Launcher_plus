@@ -82,11 +82,17 @@ namespace GenShin_Launcher_Plus.Service
             }
 
             bool isCn = App.Current.DataModel.ReadLang is "Lang_CN" or null or "";
-            string json = await HtmlHelper.GetInfoFromHtmlAsync(isCn ? "UpdateCN" : "UpdateGlobal");
-            App.Current.UpdateObject = JsonConvert.DeserializeObject<UpdateModel>(json) ?? new();
+            var (updateObject, pkgVersion) = await Task.Run(async () =>
+            {
+                string json = await HtmlHelper.GetInfoFromHtmlAsync(isCn ? "UpdateCN" : "UpdateGlobal").ConfigureAwait(false);
+                var update = JsonConvert.DeserializeObject<UpdateModel>(json) ?? new UpdateModel();
+                string pkg = await HtmlHelper.GetPkgVersionAsync().ConfigureAwait(false);
+                return (update, pkg);
+            });
+            App.Current.UpdateObject = updateObject;
 
             App.Current.PkgUpdataModel ??= new PkgUpdataModel();
-            App.Current.PkgUpdataModel.PkgVersion = await HtmlHelper.GetPkgVersionAsync();
+            App.Current.PkgUpdataModel.PkgVersion = pkgVersion;
 
             string newVer = App.Current.UpdateObject.Version;
             bool requisite = App.Current.UpdateObject.RequisiteUpdate;

@@ -38,7 +38,6 @@ namespace GenShin_Launcher_Plus.ViewModels
             SaveLangCommand = new RelayCommand(SaveAndRestart);
             ThisPageRemoveCommand = new RelayCommand(ThisPageRemove);
             ChooseGamePathCommand = new RelayCommand(ChooseGamePath);
-            AutoSearchGameCommand = new RelayCommand(AutoSearchGame);
             SwitchAccountCommand = new RelayCommand(() => FlipViewSelectedIndex = 1);
             SwitchGameSettingsCommand = new RelayCommand(() => FlipViewSelectedIndex = 0);
             SwitchThemeSettingsCommand = new RelayCommand(() => FlipViewSelectedIndex = 2);
@@ -62,6 +61,8 @@ namespace GenShin_Launcher_Plus.ViewModels
             _gamePortLists = SettingService.CreateGamePortList();
             _displaySizeLists = SettingService.CreateDisplaySizeList();
             _gameWindowModeList = SettingService.CreateGameWindowModeList();
+
+            TryAutoRecognizeGamePath();
         }
 
         private readonly bool _isGameMode;
@@ -408,7 +409,6 @@ namespace GenShin_Launcher_Plus.ViewModels
         public ICommand SaveSettingsCommand { get; }
         public ICommand ThisPageRemoveCommand { get; }
         public ICommand ChooseGamePathCommand { get; }
-        public ICommand AutoSearchGameCommand { get; }
         public ICommand SwitchAccountCommand { get; }
         public ICommand SwitchGameSettingsCommand { get; }
         public ICommand SwitchProgramSettingCommand { get; }
@@ -433,35 +433,39 @@ namespace GenShin_Launcher_Plus.ViewModels
                 ShowNewFolderButton = false
             };
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
                 GamePath = dialog.SelectedPath;
+                RefreshAudioPacks();
+            }
         }
 
-        private void AutoSearchGame()
+        private void TryAutoRecognizeGamePath()
         {
+            if (!_isGameMode) return;
+
             var biz = App.Current.DataModel.ActiveBiz;
             var game = App.Current.DataModel.ActiveGame;
             if (game == null) return;
+            if (IsGamePathValid(GamePath, game, biz)) return;
 
             var result = GameSearchService.FindGame(game, biz.Server);
-            if (result != null)
-            {
-                var gameBiz = $"{game.Id}_{result.Server}";
-                App.Current.DataModel.ActiveGameBiz = gameBiz;
-                GamePath = result.Path;
-                App.Current.DataModel.SetGamePath(gameBiz, result.Path);
-                App.Current.DataModel.SaveDataToFile();
-                App.Current.ThisMainWindow.ViewModel.RefreshGameSelector();
-                // Use LanguageService to get the string with a reliable fallback
-                string msg = LanguageService.Instance.GetString("GameFoundMsg");
-                if (msg == "GameFoundMsg") msg = "\u627E\u5230\u6E38\u620F\u5BA2\u6237\u7AEF\uFF1A{0}";
-                DialogHelper.ShowInfo(string.Format(msg, result.Path), languages.TipsStr);
-            }
-            else
-            {
-                string msg = LanguageService.Instance.GetString("GameNotFoundMsg");
-                if (msg == "GameNotFoundMsg") msg = "\u672A\u627E\u5230\u6E38\u620F\u5BA2\u6237\u7AEF\uFF0C\u8BF7\u624B\u52A8\u9009\u62E9\u5B89\u88C5\u76EE\u5F55\u3002";
-                DialogHelper.ShowWarning(msg, languages.Error);
-            }
+            if (result == null) return;
+
+            var gameBiz = $"{game.Id}_{result.Server}";
+            App.Current.DataModel.ActiveGameBiz = gameBiz;
+            GamePath = result.Path;
+            App.Current.DataModel.SetGamePath(gameBiz, result.Path);
+            App.Current.DataModel.SaveDataToFile();
+            App.Current.ThisMainWindow.ViewModel.RefreshGameSelector();
+            RefreshAudioPacks();
+            Logger.Info($"Auto recognized game path: {result.Path} for {gameBiz}", "Settings");
+        }
+
+        private static bool IsGamePathValid(string? gamePath, GameProfile game, GameBiz biz)
+        {
+            if (string.IsNullOrWhiteSpace(gamePath)) return false;
+            var exe = game.GetExeName(biz);
+            return File.Exists(Path.Combine(gamePath, exe));
         }
 
         // === Audio Language Pack Management ===
@@ -498,7 +502,7 @@ namespace GenShin_Launcher_Plus.ViewModels
                 AudioPacks = new List<AudioPackInfo>();
                 return;
             }
-            AudioPacks = GameInstallService.GetAudioPackStatus(path);
+            AudioPacks = GameInstallService.GetAudioPackStatus(path, App.Current.DataModel.ActiveGame, App.Current.DataModel.ActiveBiz);
         }
 
         private async void InstallAudioPack(string? audioField)

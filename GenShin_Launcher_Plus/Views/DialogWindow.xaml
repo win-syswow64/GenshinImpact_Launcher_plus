@@ -10,7 +10,7 @@
         SizeToContent="WidthAndHeight"
         MinWidth="380" MaxWidth="520">
     <Border Background="#80000000" Padding="0">
-        <Border x:Name="CardBorder" Background="#2D2D2D" CornerRadius="8"
+        <Border x:Name="CardBorder" Background="{StaticResource GlassPanelBrush}" CornerRadius="8"
                 BorderBrush="#383838" BorderThickness="1"
                 MinWidth="340" MaxWidth="460">
             <Grid Margin="24">

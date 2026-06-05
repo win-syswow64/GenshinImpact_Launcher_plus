@@ -6,9 +6,9 @@
              mc:Ignorable="d">
     <Grid>
         <!-- Top bar -->
-        <Grid Height="44" VerticalAlignment="Top" Background="#282828">
+        <Grid Height="48" VerticalAlignment="Top" Background="{StaticResource TopBarBrush}">
             <StackPanel Orientation="Horizontal" Margin="12,0">
-                <Button Style="{StaticResource IconButton}" Width="32" Height="32"
+                <Button Style="{StaticResource IconButton}" Width="36" Height="36"
                         Content="&#xE72B;" Foreground="#B0FFFFFF"
                         Command="{Binding ThisPageRemoveCommand}" ToolTip="{Binding languages.BackToolTip}"
                         VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -54,7 +54,7 @@
         </Grid>
 
         <!-- Tab Content -->
-        <Grid Margin="0,44,0,0" IsEnabled="{Binding IsPageEnabled}">
+        <Grid Margin="0,48,0,0" IsEnabled="{Binding IsPageEnabled}">
             <TabControl SelectedIndex="{Binding FlipViewSelectedIndex}"
                         BorderThickness="0" Background="Transparent" Padding="0">
                 <TabControl.Template>
@@ -74,53 +74,59 @@
                                 <TextBox Grid.Column="0" Text="{Binding Width}" Style="{StaticResource InputTextBox}"/>
                                 <TextBlock Grid.Column="1" Text=" x " Foreground="#80FFFFFF" VerticalAlignment="Center" Margin="8,0"/>
                                 <TextBox Grid.Column="2" Text="{Binding Height}" Style="{StaticResource InputTextBox}"/>
-                                <Button Grid.Column="3" Content="&#xE710;" Style="{StaticResource IconButton}" Width="32" Height="32" Command="{Binding SaveDisplaySizeCommand}" ToolTip="{Binding languages.AddPresetToolTip}"/>
+                                <Button Grid.Column="3" Content="&#xE710;" Style="{StaticResource IconButton}" Width="36" Height="36" Command="{Binding SaveDisplaySizeCommand}" ToolTip="{Binding languages.AddPresetToolTip}"/>
                             </Grid>
                             <TextBlock Style="{StaticResource SectionHeaderText}" Text="{Binding languages.PresetResolutionHeader}"/>
                             <Grid Margin="0,0,0,12">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <ComboBox Grid.Column="0" Style="{StaticResource DarkComboBox}" DisplayMemberPath="SizeName" SelectedIndex="{Binding DisplaySizeIndex}" ItemsSource="{Binding DisplaySizeLists}" SelectedValue="{Binding SwitchSize, Mode=OneWayToSource}"/>
-                                <Button Grid.Column="1" Content="&#xE74D;" Style="{StaticResource IconButton}" Width="32" Height="32" Command="{Binding RemoveDisplaySizeCommand}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="1" Content="&#xE74D;" Style="{StaticResource IconButton}" Width="36" Height="36" Command="{Binding RemoveDisplaySizeCommand}" Margin="8,0,0,0"/>
                             </Grid>
                             <TextBlock Style="{StaticResource SectionHeaderText}" Text="{Binding languages.WindowModeHeader}"/>
                             <ComboBox Style="{StaticResource DarkComboBox}" DisplayMemberPath="GameWindowMode" SelectedIndex="{Binding FullSize}" ItemsSource="{Binding GameWindowModeList}" Margin="0,0,0,12"/>
                             <CheckBox Content="{Binding languages.BorderlessCkB}" Style="{StaticResource ToggleSwitch}" IsChecked="{Binding IsPopup}" Margin="0,0,0,12"/>
                             <TextBlock Style="{StaticResource SectionHeaderText}" Text="{Binding languages.GameDirectoryHeader}"/>
                             <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBox Grid.Column="0" Style="{StaticResource InputTextBox}" Text="{Binding GamePath}" IsReadOnly="True"/>
-                                <Button Grid.Column="1" Content="&#xE721;" Style="{StaticResource IconButton}" Width="32" Height="32" Command="{Binding AutoSearchGameCommand}" ToolTip="{Binding languages.AutoSearchToolTip}" Margin="8,0,0,0"/>
-                                <Button Grid.Column="2" Content="..." Style="{StaticResource SecondaryButton}" Width="40" Command="{Binding ChooseGamePathCommand}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="1"
+                                        Content="&#xE838;"
+                                        Style="{StaticResource IconButton}"
+                                        Width="36" Height="36"
+                                        Command="{Binding ChooseGamePathCommand}"
+                                        ToolTip="{Binding languages.GameDirectoryHeader}"
+                                        Margin="8,0,0,0"/>
                             </Grid>
 
                             <!-- Audio Language Packs -->
                             <TextBlock Style="{StaticResource SectionHeaderText}" Text="音频语言包" Margin="0,16,0,0"/>
                             <TextBlock Text="{Binding AudioPackDisplayText}" Foreground="#80FFFFFF" FontSize="12" Margin="0,0,0,8"/>
                             <StackPanel IsEnabled="{Binding AudioPackPanelEnabled}">
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Chinese (zh-cn)" Foreground="#C0FFFFFF" VerticalAlignment="Center"/>
-                                    <Button Grid.Column="1" Content="安装" Style="{StaticResource SecondaryButton}" Width="60" Height="28" FontSize="12"
-                                            Command="{Binding InstallAudioPackCommand}" CommandParameter="zh-cn"/>
-                                </Grid>
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="English (en-us)" Foreground="#C0FFFFFF" VerticalAlignment="Center"/>
-                                    <Button Grid.Column="1" Content="安装" Style="{StaticResource SecondaryButton}" Width="60" Height="28" FontSize="12"
-                                            Command="{Binding InstallAudioPackCommand}" CommandParameter="en-us"/>
-                                </Grid>
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Japanese (ja-jp)" Foreground="#C0FFFFFF" VerticalAlignment="Center"/>
-                                    <Button Grid.Column="1" Content="安装" Style="{StaticResource SecondaryButton}" Width="60" Height="28" FontSize="12"
-                                            Command="{Binding InstallAudioPackCommand}" CommandParameter="ja-jp"/>
-                                </Grid>
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Korean (ko-kr)" Foreground="#C0FFFFFF" VerticalAlignment="Center"/>
-                                    <Button Grid.Column="1" Content="安装" Style="{StaticResource SecondaryButton}" Width="60" Height="28" FontSize="12"
-                                            Command="{Binding InstallAudioPackCommand}" CommandParameter="ko-kr"/>
-                                </Grid>
+                                <ItemsControl ItemsSource="{Binding AudioPacks}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,0,0,6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding DisplayName}"
+                                                           Foreground="#C0FFFFFF"
+                                                           VerticalAlignment="Center"/>
+                                                <Button Grid.Column="1"
+                                                        Content="{Binding ButtonText}"
+                                                        Style="{StaticResource SecondaryButton}"
+                                                        Width="78" Height="32"
+                                                        Padding="0"
+                                                        FontSize="12"
+                                                        Command="{Binding DataContext.InstallAudioPackCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding Field}"
+                                                        IsEnabled="{Binding CanInstall}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
                             <!-- Audio download progress -->
                             <Border Visibility="{Binding IsAudioDownloading, Converter={StaticResource BoolToVis}}" Background="#20FFFFFF" CornerRadius="8" Padding="12,8" Margin="0,8,0,0">
@@ -276,7 +282,7 @@
                             <Grid Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="{Binding languages.CustomBackgroundHeader}" Foreground="#80FFFFFF" FontSize="12" VerticalAlignment="Center"/>
-                                <Button Grid.Column="1" Content="&#xE72C;" Style="{StaticResource IconButton}" Width="32" Height="32"
+                                <Button Grid.Column="1" Content="&#xE72C;" Style="{StaticResource IconButton}" Width="36" Height="36"
                                         Command="{Binding RefreshBackgroundsCommand}" ToolTip="Refresh"/>
                             </Grid>
 

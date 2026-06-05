@@ -50,6 +50,8 @@ namespace GenShin_Launcher_Plus.ViewModels
                         OnPropertyChanged(nameof(ActionButtonEnabled));
                         OnPropertyChanged(nameof(ShowProgressPanel));
                         OnPropertyChanged(nameof(ShowPreDownloadButton));
+                        OnPropertyChanged(nameof(InstallStatusTitle));
+                        OnPropertyChanged(nameof(VersionStatusText));
                         break;
                     case nameof(GameInstallService.ProgressPercent):
                     case nameof(GameInstallService.ProgressText):
@@ -57,6 +59,7 @@ namespace GenShin_Launcher_Plus.ViewModels
                     case nameof(GameInstallService.BytesProgressText):
                         // These bind directly, but also update button text
                         OnPropertyChanged(nameof(ActionButtonText));
+                        OnPropertyChanged(nameof(InstallStatusTitle));
                         break;
                 }
             };
@@ -74,13 +77,17 @@ namespace GenShin_Launcher_Plus.ViewModels
             CancelInstallCommand = new RelayCommand(CancelInstall);
             languages.PropertyChanged += (_, _) =>
             {
-                Title = $"{languages.MainTitle} {Application.ResourceAssembly.GetName().Version}";
+                Title = languages.MainTitle?.Trim() ?? "Genshin Launcher Plus";
                 OnPropertyChanged(nameof(ActionButtonText));
                 OnPropertyChanged(nameof(ServerDisplayNames));
                 OnPropertyChanged(nameof(CurrentServerDisplay));
+                OnPropertyChanged(nameof(CurrentGameDisplayName));
+                OnPropertyChanged(nameof(VersionStatusText));
+                OnPropertyChanged(nameof(ProgramVersionText));
+                OnPropertyChanged(nameof(InstallStatusTitle));
             };
 
-            Title = $"{languages.MainTitle} {Application.ResourceAssembly.GetName().Version}";
+            Title = languages.MainTitle?.Trim() ?? "Genshin Launcher Plus";
             App.Current.DataModel.EXEname(Path.GetFileName(Environment.ProcessPath));
 
             _ = SetNoticeAsync();
@@ -106,6 +113,8 @@ namespace GenShin_Launcher_Plus.ViewModels
                 OnPropertyChanged(nameof(ShowProgressPanel));
                 OnPropertyChanged(nameof(CanRunGame));
                 OnPropertyChanged(nameof(ShowPreDownloadButton));
+                OnPropertyChanged(nameof(VersionStatusText));
+                OnPropertyChanged(nameof(InstallStatusTitle));
             }
         }
 
@@ -138,6 +147,38 @@ namespace GenShin_Launcher_Plus.ViewModels
 
         public bool ShowPreDownloadButton =>
             CurrentGameState?.State == GameState.PreDownloadAvailable && !InstallService.IsInstalling;
+
+        public string CurrentGameDisplayName =>
+            App.Current.DataModel.ActiveGame?.DisplayName ?? "HoYoPlay";
+
+        public string VersionStatusText
+        {
+            get
+            {
+                if (CurrentGameState == null)
+                    return "";
+
+                var local = CurrentGameState.LocalVersion?.ToString();
+                var latest = CurrentGameState.LatestVersion;
+                var pre = CurrentGameState.PreDownloadVersion;
+
+                return CurrentGameState.State switch
+                {
+                    GameState.NotInstalled => languages.GameNotInstalledText ?? "游戏未安装",
+                    GameState.NeedUpdate when !string.IsNullOrWhiteSpace(local) && !string.IsNullOrWhiteSpace(latest) =>
+                        $"版本 {local} -> {latest}",
+                    GameState.NeedUpdate => languages.UpdateGameBtn ?? "更新游戏",
+                    GameState.PreDownloadAvailable when !string.IsNullOrWhiteSpace(pre) =>
+                        $"可预下载 {pre}",
+                    GameState.Ready when !string.IsNullOrWhiteSpace(local) =>
+                        $"版本 {local}",
+                    _ => languages.RunGameBtn ?? "启动游戏",
+                };
+            }
+        }
+
+        public string InstallStatusTitle =>
+            InstallService.IsInstalling ? InstallService.StateText : VersionStatusText;
 
         public ICommand InstallGameCommand { get; }
         public ICommand UpdateGameCommand { get; }
@@ -250,7 +291,11 @@ namespace GenShin_Launcher_Plus.ViewModels
             try
             {
                 var gameBiz = App.Current.DataModel.ActiveGameBiz;
-                CurrentGameState = await GameStateService.DetectGameStateAsync(gameBiz, token);
+                var state = await Task.Run(
+                    async () => await GameStateService.DetectGameStateAsync(gameBiz, token).ConfigureAwait(false),
+                    token);
+                token.ThrowIfCancellationRequested();
+                CurrentGameState = state;
             }
             catch (TaskCanceledException) { }
             catch (Exception ex) { Logger.Warn($"RefreshGameState failed: {ex.Message}", "GameState"); }
@@ -259,6 +304,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         // === Standard properties ===
         private string _title = string.Empty;
         public string Title { get => _title; set => SetProperty(ref _title, value); }
+        public string ProgramVersionText => $"v{Application.ResourceAssembly.GetName().Version}";
         private ImageBrush _background = new();
         public ImageBrush Background { get => _background; set => SetProperty(ref _background, value); }
         private object? _currentPage;
@@ -398,6 +444,9 @@ namespace GenShin_Launcher_Plus.ViewModels
             OnPropertyChanged(nameof(GamePathDisplay));
             OnPropertyChanged(nameof(CanRunGame));
             OnPropertyChanged(nameof(CurrentServerDisplay));
+            OnPropertyChanged(nameof(CurrentGameDisplayName));
+            OnPropertyChanged(nameof(VersionStatusText));
+            OnPropertyChanged(nameof(InstallStatusTitle));
             SwitchPort = $"{languages.GameClientStr} : {CurrentServerDisplay}";
             App.Current.NoticeOverAllBase.SwitchPort = SwitchPort;
             if (reloadBackground)

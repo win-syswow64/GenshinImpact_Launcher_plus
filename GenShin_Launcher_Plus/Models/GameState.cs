@@ -18,7 +18,7 @@ public enum GameState
     /// <summary>Game process is running</summary>
     Running = 5,
     /// <summary>Install/update completed</summary>
-    InstallComplete = 5,
+    InstallComplete = 6,
 }
 
 /// <summary>

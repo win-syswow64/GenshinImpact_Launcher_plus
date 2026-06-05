@@ -43,7 +43,7 @@ public static class HoYoPlayApiService
 
             var url = $"{baseUrl}getGamePackages?launcher_id={launcherId}&language=zh-cn&game_ids[]={gameId}";
             Logger.Debug($"Fetching game package: {url}", "HoYoPlay");
-            var json = await _httpClient.GetStringAsync(url, ct);
+            var json = await _httpClient.GetStringAsync(url, ct).ConfigureAwait(false);
             var resp = JsonSerializer.Deserialize<HoYoApiResponse<GamePackageResponse>>(json, _jsonOptions);
             if (resp?.Retcode != 0) { Logger.Warn($"GetGamePackage error: {resp?.Retcode} {resp?.Message}", "HoYoPlay"); return null; }
             return resp?.Data?.GamePackages?.FirstOrDefault(x => x.Game?.Id == gameId);
@@ -62,7 +62,7 @@ public static class HoYoPlayApiService
 
             var url = $"{baseUrl}getGameBranches?launcher_id={launcherId}&language=zh-cn&game_ids[]={gameId}";
             Logger.Debug($"Fetching game branch: {url}", "HoYoPlay");
-            var json = await _httpClient.GetStringAsync(url, ct);
+            var json = await _httpClient.GetStringAsync(url, ct).ConfigureAwait(false);
             var resp = JsonSerializer.Deserialize<HoYoApiResponse<GameBranchResponse>>(json, _jsonOptions);
             if (resp?.Retcode != 0) { Logger.Warn($"GetGameBranch error: {resp?.Retcode} {resp?.Message}", "HoYoPlay"); return null; }
             return resp?.Data?.GameBranches?.FirstOrDefault(x => x.Game?.Id == gameId);
@@ -72,9 +72,9 @@ public static class HoYoPlayApiService
 
     public static async Task<(string? Latest, string? Predownload)> GetLatestVersionsAsync(string gameBiz, CancellationToken ct = default)
     {
-        var branch = await GetGameBranchAsync(gameBiz, ct);
+        var branch = await GetGameBranchAsync(gameBiz, ct).ConfigureAwait(false);
         if (branch?.Main?.Tag != null) return (branch.Main.Tag, branch.PreDownload?.Tag);
-        var package = await GetGamePackageAsync(gameBiz, ct);
+        var package = await GetGamePackageAsync(gameBiz, ct).ConfigureAwait(false);
         if (package?.Main?.Major?.Version != null) return (package.Main.Major.Version, package.PreDownload?.Major?.Version);
         return (null, null);
     }
@@ -192,7 +192,7 @@ public static class HoYoPlayApiService
     {
         var plan = new ChunkDownloadPlan { GameBiz = gameBiz, InstallPath = installPath };
 
-        var sophonBuild = await GetSophonChunkBuildAsync(gameBiz, branchPackage, localVersionTag, ct);
+        var sophonBuild = await GetSophonChunkBuildAsync(gameBiz, branchPackage, "", ct);
         if (sophonBuild == null || sophonBuild.Manifests == null)
         {
             Logger.Warn("Sophon build is null, falling back to package mode", "Sophon");
@@ -200,6 +200,16 @@ public static class HoYoPlayApiService
         }
 
         plan.Version = sophonBuild.Tag ?? branchPackage.Tag;
+
+        SophonChunkBuildResponse? localBuild = null;
+        if (!string.IsNullOrWhiteSpace(localVersionTag) &&
+            !string.Equals(localVersionTag, plan.Version, StringComparison.OrdinalIgnoreCase))
+        {
+            localBuild = await GetSophonChunkBuildAsync(gameBiz, branchPackage, localVersionTag, ct);
+            Logger.Info(localBuild?.Manifests is null
+                ? $"Local chunk build not available for {localVersionTag}"
+                : $"Local chunk build loaded for {localVersionTag}", "Sophon");
+        }
 
         // Include ALL manifests (game + all audio languages)
         // The install service will filter by audio need after hard-link phase
@@ -231,6 +241,20 @@ public static class HoYoPlayApiService
             var chunkManifest = await DownloadChunkManifestAsync(manifest.ManifestDownload, manifest.Manifest, ct);
             if (chunkManifest == null) continue;
 
+            Dictionary<string, SophonChunkFile> localFiles = new(StringComparer.OrdinalIgnoreCase);
+            if (localBuild?.Manifests?.FirstOrDefault(x => x.MatchingField == mf) is SophonManifestInfo localManifest)
+            {
+                var localChunkManifest = await DownloadChunkManifestAsync(localManifest.ManifestDownload, localManifest.Manifest, ct);
+                if (localChunkManifest != null)
+                {
+                    foreach (var localFile in localChunkManifest.Chuncks)
+                    {
+                        if (!localFile.IsFolder)
+                            localFiles.TryAdd(localFile.File, localFile);
+                    }
+                }
+            }
+
             string urlPrefix = manifest.ChunkDownload?.UrlPrefix?.TrimEnd('/') ?? "";
 
             foreach (var file in chunkManifest.Chuncks)
@@ -250,11 +274,22 @@ public static class HoYoPlayApiService
                     Size = file.Size > 0 ? file.Size : file.Chunks.Sum(c => c.UncompressedSize),
                     MD5 = file.Md5,
                     ManifestField = mf ?? "",
+                    InstallPath = installPath,
                 };
+
+                localFiles.TryGetValue(file.File, out var localFile);
+                Dictionary<string, SophonChunk> localChunkByMD5 = new(StringComparer.OrdinalIgnoreCase);
+                if (localFile?.Chunks is not null)
+                {
+                    foreach (var localChunk in localFile.Chunks)
+                    {
+                        localChunkByMD5.TryAdd(localChunk.UncompressedMd5, localChunk);
+                    }
+                }
 
                 foreach (var chunk in file.Chunks)
                 {
-                    taskFile.Chunks.Add(new ChunkInfo
+                    var taskChunk = new ChunkInfo
                     {
                         Id = chunk.Id,
                         Url = $"{urlPrefix}/{chunk.Id}",
@@ -263,7 +298,19 @@ public static class HoYoPlayApiService
                         UncompressedSize = chunk.UncompressedSize,
                         CompressedMD5 = chunk.CompressedMd5,
                         UncompressedMD5 = chunk.UncompressedMd5,
-                    });
+                    };
+
+                    if (localFile != null &&
+                        localChunkByMD5.TryGetValue(chunk.UncompressedMd5, out var localChunk) &&
+                        localChunk.UncompressedSize == chunk.UncompressedSize)
+                    {
+                        taskChunk.OriginalFileName = localFile.File;
+                        taskChunk.OriginalFileFullPath = ResolveSafeChildPath(installPath, localFile.File) ?? "";
+                        taskChunk.OriginalFileSize = localFile.Size;
+                        taskChunk.OriginalFileOffset = localChunk.Offset;
+                    }
+
+                    taskFile.Chunks.Add(taskChunk);
                 }
 
                 plan.Files.Add(taskFile);
@@ -316,6 +363,7 @@ public class ChunkDownloadPlan
 
 public class ChunkDownloadFile
 {
+    public string InstallPath { get; set; }
     public string RelativePath { get; set; }
     public string FullPath { get; set; }
     public long Size { get; set; }
@@ -335,6 +383,10 @@ public class ChunkInfo
     public long UncompressedSize { get; set; }
     public string CompressedMD5 { get; set; }
     public string UncompressedMD5 { get; set; }
+    public string OriginalFileName { get; set; }
+    public string OriginalFileFullPath { get; set; }
+    public long OriginalFileSize { get; set; }
+    public long OriginalFileOffset { get; set; }
 }
 
 

@@ -72,14 +72,14 @@ public static class GameStateService
         {
             info.State = GameState.NotInstalled;
             // Still check for latest version
-            var (latest, predownload) = await HoYoPlayApiService.GetLatestVersionsAsync(gameBiz, ct);
+            var (latest, predownload) = await HoYoPlayApiService.GetLatestVersionsAsync(gameBiz, ct).ConfigureAwait(false);
             info.LatestVersion = latest;
             info.PreDownloadVersion = predownload;
             return info;
         }
 
         // Game is installed, check versions
-        var (latestVer, predownloadVer) = await HoYoPlayApiService.GetLatestVersionsAsync(gameBiz, ct);
+        var (latestVer, predownloadVer) = await HoYoPlayApiService.GetLatestVersionsAsync(gameBiz, ct).ConfigureAwait(false);
         info.LatestVersion = latestVer;
         info.PreDownloadVersion = predownloadVer;
 

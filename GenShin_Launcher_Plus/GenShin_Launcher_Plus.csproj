@@ -30,7 +30,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="ICON.ico" />
+    <Resource Include="ICON.ico" />
   </ItemGroup>
 
   <ItemGroup>

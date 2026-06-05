@@ -187,23 +187,13 @@ public class GameInstallService : INotifyPropertyChanged
             StatusText = $"已解析 {plan.TotalFiles} 个文件, {plan.TotalChunks} 个分片";
             await Task.Yield(); // let UI repaint after manifest phase
 
-            // ── Phase 1: Local match (size only, instant) ──
+            // ── Phase 1: Local match (size + MD5 when available) ──
             StatusText = "正在检查本地文件...";
-            await Task.Yield(); // let UI repaint
-            int localMatched = MarkLocalBySize(plan, installPath);
-            Logger.Info($"Phase 1 - Local size match: {localMatched}/{plan.TotalFiles}", "Install");
+            await Task.Yield();
+            int localMatched = await MarkLocalFilesAsync(plan, installPath, token);
+            Logger.Info($"Phase 1 - Local file match: {localMatched}/{plan.TotalFiles}", "Install");
             StatusText = $"本地文件匹配: {localMatched}/{plan.TotalFiles}";
             await Task.Yield();
-
-
-            // Phase 1.5: MD5 verification for critical files (Persistent, StreamingAssets .blk)
-            int md5Failed = await VerifyLocalFileMD5Async(plan, installPath, token);
-            if (md5Failed > 0)
-            {
-                Logger.Info($"Phase 1.5 - MD5 verify: {md5Failed} files need re-download", "Install");
-                StatusText = $"MD5 校验完成, {md5Failed} 个文件需要重新下载";
-                await Task.Yield();
-            }
 
             // ── Phase 2: Hard link (with MD5 verification, CPU-bound) ──
             int hardLinked = 0;
@@ -328,19 +318,10 @@ public class GameInstallService : INotifyPropertyChanged
 
             StatusText = $"已解析 {plan.TotalFiles} 个文件";
             await Task.Yield(); // let UI repaint
-            int localMatched = MarkLocalBySize(plan, installPath);
+            int localMatched = await MarkLocalFilesAsync(plan, installPath, token);
             Logger.Info($"Update: {localMatched}/{plan.TotalFiles} files unchanged", "Install");
             StatusText = $"本地文件匹配: {localMatched}/{plan.TotalFiles}";
             await Task.Yield();
-
-            // MD5 verification for critical files (Persistent, StreamingAssets .blk)
-            int md5Failed = await VerifyLocalFileMD5Async(plan, installPath, token);
-            if (md5Failed > 0)
-            {
-                Logger.Info($"Update MD5 verify: {md5Failed} files need re-download", "Install");
-                StatusText = $"MD5 校验完成, {md5Failed} 个文件需要重新下载";
-                await Task.Yield();
-            }
 
             var toDownload = plan.Files.Where(f => !f.IsFinished).ToList();
             long remainingBytes = toDownload.Sum(f => f.Chunks.Sum(c => c.CompressedSize));
@@ -404,25 +385,9 @@ public class GameInstallService : INotifyPropertyChanged
                 status => { StatusText = status; Logger.Debug(status, "PreDownload"); }, token);
             if (plan == null || plan.Files.Count == 0) { State = GameInstallState.Finished; StatusText = "无预下载"; return; }
 
-            var stagingDir = Path.Combine(installPath, "staging");
-            Directory.CreateDirectory(stagingDir);
-
-            // Skip already downloaded staging files
-            foreach (var file in plan.Files)
-            {
-                var sp = ResolveSafeChildPath(stagingDir, file.RelativePath);
-                if (sp == null)
-                {
-                    file.IsFinished = true;
-                    Logger.Warn($"Skipped unsafe predownload path: {file.RelativePath}", "Install");
-                    continue;
-                }
-                if (File.Exists(sp) && new FileInfo(sp).Length == file.Size)
-                    file.IsFinished = true;
-            }
-
-            var toDownload = plan.Files.Where(f => !f.IsFinished).ToList();
-            long remainingBytes = toDownload.Sum(f => f.Chunks.Sum(c => c.CompressedSize));
+            var chunks = BuildPredownloadChunkList(plan, installPath);
+            var toDownload = chunks.Where(x => !IsChunkCacheReady(x.Chunk, x.CachePath)).ToList();
+            long remainingBytes = toDownload.Sum(x => x.Chunk.CompressedSize);
 
             if (toDownload.Count == 0)
             {
@@ -435,17 +400,13 @@ public class GameInstallService : INotifyPropertyChanged
 
             _totalBytes = remainingBytes; _downloadedBytes = 0;
             StartSpeedTracking();
-            StatusText = $"预下载中 ({toDownload.Count} 文件, {FormatBytes(remainingBytes)})...";
+            StatusText = $"预下载中 ({toDownload.Count} 个分片, {FormatBytes(remainingBytes)})...";
 
             int dlDone = 0;
             await RunParallelWithCancelAsync(toDownload, token, async (file, ct2) =>
             {
-                var stagingPath = ResolveSafeChildPath(stagingDir, file.RelativePath)
-                    ?? throw new IOException($"Unsafe predownload path: {file.RelativePath}");
-                Directory.CreateDirectory(Path.GetDirectoryName(stagingPath)!);
                 var httpClient = _httpClients[Environment.CurrentManagedThreadId % _httpClients.Length];
-                var sf = new ChunkDownloadFile { RelativePath = file.RelativePath, FullPath = stagingPath, Size = file.Size, MD5 = file.MD5, Chunks = file.Chunks };
-                await DownloadChunksToFileAsync(httpClient, sf, ct2);
+                await DownloadChunkCacheAsync(httpClient, file.Chunk, file.CachePath, ct2);
                 var done = Interlocked.Increment(ref dlDone);
                 ProgressPercent = (double)done / toDownload.Count * 100;
             });
@@ -485,28 +446,47 @@ public class GameInstallService : INotifyPropertyChanged
     }
 
     // ================================================
-    //  Size-based matching (instant, no MD5)
+    //  Local file matching
     // ================================================
 
     /// <summary>
-    /// Mark files already present in the install directory by comparing path + size.
-    /// This is instant - no disk reads needed, just FileInfo metadata.
+    /// Mark files already present in the install directory by comparing path, size and MD5 when available.
     /// </summary>
-    private int MarkLocalBySize(ChunkDownloadPlan plan, string installPath)
+    private async Task<int> MarkLocalFilesAsync(ChunkDownloadPlan plan, string installPath, CancellationToken ct)
     {
-        int count = 0;
-        foreach (var file in plan.Files)
-        {
-            if (file.IsFinished) continue;
-            var localPath = ResolveSafeChildPath(installPath, file.RelativePath);
-            if (localPath == null) continue;
-            if (File.Exists(localPath) && new FileInfo(localPath).Length == file.Size)
+        var candidates = plan.Files
+            .Where(file =>
             {
-                file.IsFinished = true;
-                count++;
-            }
-        }
-        return count;
+                if (file.IsFinished) return false;
+                var localPath = ResolveSafeChildPath(installPath, file.RelativePath);
+                return localPath != null && File.Exists(localPath) && new FileInfo(localPath).Length == file.Size;
+            })
+            .ToList();
+        if (candidates.Count == 0) return 0;
+
+        int matched = 0, done = 0, total = candidates.Count;
+        int degree = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
+        StatusText = $"正在校验本地文件 ({total})...";
+
+        await Task.Run(() =>
+        {
+            Parallel.ForEach(candidates, new ParallelOptions { MaxDegreeOfParallelism = degree, CancellationToken = ct }, file =>
+            {
+                ct.ThrowIfCancellationRequested();
+                var localPath = ResolveSafeChildPath(installPath, file.RelativePath);
+                if (localPath != null && (string.IsNullOrWhiteSpace(file.MD5) || VerifyFileMD5(localPath, file.MD5)))
+                {
+                    file.IsFinished = true;
+                    Interlocked.Increment(ref matched);
+                }
+
+                var current = Interlocked.Increment(ref done);
+                if (current % 100 == 0 || current == total)
+                    ProgressPercent = (double)current / total * 100;
+            });
+        }, ct);
+
+        return matched;
     }
 
     /// <summary>
@@ -652,6 +632,16 @@ public class GameInstallService : INotifyPropertyChanged
         var dir = Path.GetDirectoryName(file.FullPath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
+        if (File.Exists(file.FullPath) &&
+            new FileInfo(file.FullPath).Length == file.Size &&
+            (string.IsNullOrWhiteSpace(file.MD5) || VerifyFileMD5(file.FullPath, file.MD5)))
+        {
+            foreach (var chunk in file.Chunks)
+                ReportBytes(chunk.CompressedSize);
+            file.IsFinished = true;
+            return;
+        }
+
         var tmpPath = file.FullPath + "_tmp";
         await using var fs = new FileStream(tmpPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
 
@@ -667,6 +657,18 @@ public class GameInstallService : INotifyPropertyChanged
             }
 
             fs.Position = chunk.Offset;
+
+            if (await TryCopyOriginalChunkAsync(fs, chunk, ct))
+            {
+                ReportBytes(chunk.CompressedSize);
+                continue;
+            }
+
+            if (await TryCopyCachedChunkAsync(fs, file, chunk, ct))
+            {
+                ReportBytes(chunk.CompressedSize);
+                continue;
+            }
 
             const int maxRetries = 5;
             for (int retry = 0; ; retry++)
@@ -716,6 +718,210 @@ public class GameInstallService : INotifyPropertyChanged
             var actual = new FileInfo(tmpPath).Length;
             File.Delete(tmpPath);
             throw new IOException($"Size mismatch: {file.RelativePath} expected={file.Size} actual={actual}");
+        }
+    }
+
+    private static string? GetChunkCachePath(string? installPath, string chunkId)
+    {
+        if (string.IsNullOrWhiteSpace(installPath) || string.IsNullOrWhiteSpace(chunkId))
+            return null;
+        var chunkDir = Path.Combine(installPath, "chunk");
+        return ResolveSafeChildPath(chunkDir, chunkId);
+    }
+
+    private async Task<bool> TryCopyOriginalChunkAsync(FileStream destination, ChunkInfo chunk, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(chunk.OriginalFileFullPath) ||
+                !File.Exists(chunk.OriginalFileFullPath) ||
+                new FileInfo(chunk.OriginalFileFullPath).Length != chunk.OriginalFileSize)
+            {
+                return false;
+            }
+
+            if (!await VerifyFileSliceMD5Async(chunk.OriginalFileFullPath, chunk.OriginalFileOffset,
+                    chunk.UncompressedSize, chunk.UncompressedMD5, ct))
+            {
+                return false;
+            }
+
+            await CopyFileSliceAsync(chunk.OriginalFileFullPath, destination, chunk.OriginalFileOffset,
+                chunk.UncompressedSize, ct);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            Logger.Debug($"Copy original chunk failed: {chunk.Id} ({ex.Message})", "Install");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryCopyCachedChunkAsync(FileStream destination, ChunkDownloadFile file, ChunkInfo chunk, CancellationToken ct)
+    {
+        var cachePath = GetChunkCachePath(file.InstallPath, chunk.Id);
+        if (cachePath == null || !File.Exists(cachePath))
+            return false;
+
+        try
+        {
+            if (new FileInfo(cachePath).Length != chunk.CompressedSize ||
+                (!string.IsNullOrWhiteSpace(chunk.CompressedMD5) && !VerifyFileMD5(cachePath, chunk.CompressedMD5)))
+            {
+                TryDeleteFile(cachePath);
+                return false;
+            }
+
+            await using var cache = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var decompressor = new DecompressionStream(cache);
+            await decompressor.CopyToAsync(destination, ct);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            Logger.Debug($"Copy cached chunk failed: {chunk.Id} ({ex.Message})", "Install");
+            TryDeleteFile(cachePath);
+            return false;
+        }
+    }
+
+    private static async Task<bool> VerifyFileSliceMD5Async(string path, long offset, long length, string expectedMD5, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(expectedMD5))
+            return false;
+
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Length < offset + length)
+            return false;
+
+        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+            MD5_BUFFER_SIZE, FileOptions.SequentialScan);
+        fs.Position = offset;
+        using var md5 = MD5.Create();
+        var buffer = new byte[MD5_BUFFER_SIZE];
+        long remaining = length;
+        while (remaining > 0)
+        {
+            int read = await fs.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), ct);
+            if (read == 0) break;
+            md5.TransformBlock(buffer, 0, read, null, 0);
+            remaining -= read;
+        }
+        md5.TransformFinalBlock(buffer, 0, 0);
+        return remaining == 0 &&
+               md5.Hash != null &&
+               string.Equals(Convert.ToHexString(md5.Hash), expectedMD5, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task CopyFileSliceAsync(string sourcePath, FileStream destination, long offset, long length, CancellationToken ct)
+    {
+        await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+            65536, FileOptions.SequentialScan);
+        source.Position = offset;
+        var buffer = new byte[65536];
+        long remaining = length;
+        while (remaining > 0)
+        {
+            int read = await source.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), ct);
+            if (read == 0) throw new EndOfStreamException(sourcePath);
+            await destination.WriteAsync(buffer.AsMemory(0, read), ct);
+            remaining -= read;
+        }
+    }
+
+    private sealed class PredownloadChunkItem
+    {
+        public ChunkInfo Chunk { get; init; } = null!;
+        public string CachePath { get; init; } = "";
+    }
+
+    private List<PredownloadChunkItem> BuildPredownloadChunkList(ChunkDownloadPlan plan, string installPath)
+    {
+        var result = new Dictionary<string, PredownloadChunkItem>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in plan.Files)
+        {
+            foreach (var chunk in file.Chunks)
+            {
+                if (!string.IsNullOrWhiteSpace(chunk.OriginalFileFullPath) &&
+                    File.Exists(chunk.OriginalFileFullPath) &&
+                    new FileInfo(chunk.OriginalFileFullPath).Length == chunk.OriginalFileSize)
+                {
+                    continue;
+                }
+
+                var cachePath = GetChunkCachePath(installPath, chunk.Id);
+                if (cachePath == null)
+                {
+                    Logger.Warn($"Skipped unsafe chunk cache path: {chunk.Id}", "Install");
+                    continue;
+                }
+
+                result.TryAdd(chunk.Id, new PredownloadChunkItem { Chunk = chunk, CachePath = cachePath });
+            }
+        }
+        return result.Values.ToList();
+    }
+
+    private static bool IsChunkCacheReady(ChunkInfo chunk, string cachePath)
+    {
+        if (!File.Exists(cachePath) || new FileInfo(cachePath).Length != chunk.CompressedSize)
+            return false;
+        return string.IsNullOrWhiteSpace(chunk.CompressedMD5) || VerifyFileMD5(cachePath, chunk.CompressedMD5);
+    }
+
+    private async Task DownloadChunkCacheAsync(HttpClient httpClient, ChunkInfo chunk, string cachePath, CancellationToken ct)
+    {
+        if (IsChunkCacheReady(chunk, cachePath))
+            return;
+
+        var dir = Path.GetDirectoryName(cachePath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        var tmpPath = cachePath + "_tmp";
+
+        const int maxRetries = 5;
+        for (int retry = 0; ; retry++)
+        {
+            ct.ThrowIfCancellationRequested();
+            long attemptBytes = 0;
+            try
+            {
+                await using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.Read))
+                {
+                    using var response = await httpClient.GetAsync(chunk.Url, HttpCompletionOption.ResponseHeadersRead, ct);
+                    response.EnsureSuccessStatusCode();
+                    await using var stream = await response.Content.ReadAsStreamAsync(ct);
+                    var buffer = new byte[65536];
+                    int read;
+                    while ((read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+                    {
+                        await fs.WriteAsync(buffer.AsMemory(0, read), ct);
+                        ReportBytes(read);
+                        attemptBytes += read;
+                    }
+                }
+
+                if (new FileInfo(tmpPath).Length != chunk.CompressedSize)
+                    throw new IOException($"Chunk size mismatch: {chunk.Id}");
+                if (!string.IsNullOrWhiteSpace(chunk.CompressedMD5) && !VerifyFileMD5(tmpPath, chunk.CompressedMD5))
+                    throw new IOException($"Chunk MD5 mismatch: {chunk.Id}");
+
+                File.Move(tmpPath, cachePath, true);
+                return;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                if (attemptBytes > 0)
+                    Interlocked.Add(ref _downloadedBytes, -attemptBytes);
+                TryDeleteFile(tmpPath);
+                if (retry >= maxRetries)
+                    throw new IOException($"Download chunk failed: {chunk.Id}", ex);
+                int delay = Math.Min(1000 * (1 << retry), 16000);
+                Logger.Debug($"Retry chunk cache {retry + 1}: {chunk.Id} in {delay}ms ({ex.Message})", "Install");
+                await Task.Delay(delay, ct);
+            }
         }
     }
 
@@ -880,7 +1086,17 @@ public class GameInstallService : INotifyPropertyChanged
         try { var p = Path.Combine(ip, "config.ini"); if (File.Exists(p)) { var c = File.ReadAllText(p); c = Regex.Replace(c, @"predownload=.*", ""); c += $"\npredownload={local},{pre},\n"; File.WriteAllText(p, c); } } catch { }
     }
 
-    private void CleanupTempFiles(string ip) { try { foreach (var f in Directory.GetFiles(ip, "*_tmp", SearchOption.AllDirectories)) try { File.Delete(f); } catch { } } catch { } }
+    private void CleanupTempFiles(string ip) { try { foreach (var f in Directory.GetFiles(ip, "*_tmp", SearchOption.AllDirectories)) TryDeleteFile(f); } catch { } }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch { }
+    }
 
     private static string? ResolveSafeChildPath(string rootPath, string relativePath)
     {
@@ -924,6 +1140,19 @@ public class GameInstallService : INotifyPropertyChanged
             // Keep only files from the target audio manifest
             var audioFiles = plan.Files.Where(f => f.ManifestField == audioField).ToList();
             if (audioFiles.Count == 0) { State = GameInstallState.Finished; StatusText = $"{audioField} 已是最新"; return; }
+
+            var audioPlan = new ChunkDownloadPlan
+            {
+                GameBiz = gameBiz,
+                InstallPath = installPath,
+                Version = plan.Version,
+                Files = audioFiles,
+                TotalFiles = audioFiles.Count,
+                TotalChunks = audioFiles.Sum(f => f.Chunks.Count),
+            };
+            int localMatched = await MarkLocalFilesAsync(audioPlan, installPath, token);
+            if (localMatched > 0)
+                Logger.Info($"Audio {audioField}: local matched {localMatched}/{audioFiles.Count}", "Install");
 
             // Hard-link from other server versions
             var game = new GameBiz(gameBiz).Game;
@@ -996,33 +1225,124 @@ public class GameInstallService : INotifyPropertyChanged
     /// <summary>
     /// Check which audio packs are installed in the game directory.
     /// </summary>
-    public static List<AudioPackInfo> GetAudioPackStatus(string installPath)
+    public static List<AudioPackInfo> GetAudioPackStatus(string installPath, GameProfile? profile = null, GameBiz? biz = null)
     {
         var result = new List<AudioPackInfo>();
         var knownPacks = new[] {
-            ("zh-cn", "Chinese"),
-            ("en-us", "English(US)"),
-            ("ja-jp", "Japanese"),
-            ("ko-kr", "Korean"),
+            ("zh-cn", "Chinese (zh-cn)", new[] { "Chinese(PRC)", "Chinese", "zh-cn" }),
+            ("en-us", "English (en-us)", new[] { "English(US)", "English", "en-us" }),
+            ("ja-jp", "Japanese (ja-jp)", new[] { "Japanese", "ja-jp" }),
+            ("ko-kr", "Korean (ko-kr)", new[] { "Korean", "ko-kr" }),
         };
-        foreach (var (field, folder) in knownPacks)
+
+        var dataDirs = GetAudioScanDataDirs(installPath, profile, biz).ToList();
+        foreach (var (field, displayName, markers) in knownPacks)
         {
-            // Check for audio files in typical locations
-            bool installed = false;
-            foreach (var dataDir in new[] { "YuanShen_Data", "GenshinImpact_Data", "StarRail_Data", "ZenlessZoneZero_Data" })
+            bool installed = IsAudioPackInstalled(installPath, dataDirs, markers);
+            result.Add(new AudioPackInfo { Field = field, DisplayName = displayName, IsInstalled = installed });
+        }
+        return result;
+    }
+
+    private static IEnumerable<string> GetAudioScanDataDirs(string installPath, GameProfile? profile, GameBiz? biz)
+    {
+        var names = new List<string>();
+        if (profile != null && biz != null)
+            names.Add(profile.GetDataFolder(biz.Value));
+        names.AddRange(new[] { "YuanShen_Data", "GenshinImpact_Data", "StarRail_Data", "ZenlessZoneZero_Data", "BH3_Data" });
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in names)
+        {
+            var path = Path.Combine(installPath, name);
+            if (Directory.Exists(path) && seen.Add(path))
+                yield return path;
+        }
+    }
+
+    private static bool IsAudioPackInstalled(string installPath, List<string> dataDirs, string[] markers)
+    {
+        foreach (var dataDir in dataDirs)
+        {
+            var streamingAssets = Path.Combine(dataDir, "StreamingAssets");
+            var audioRoots = new[]
             {
-                var audioPath = Path.Combine(installPath, dataDir, "StreamingAssets", "AudioAssets", folder);
-                if (!Directory.Exists(audioPath)) continue;
+                Path.Combine(streamingAssets, "AudioAssets"),
+                Path.Combine(streamingAssets, "Audio"),
+                Path.Combine(streamingAssets, "Audio", "Windows"),
+                Path.Combine(streamingAssets, "Audio", "GeneratedSoundBanks", "Windows"),
+            };
+
+            foreach (var root in audioRoots.Where(Directory.Exists))
+            {
+                if (HasMarkedDirectoryWithFiles(root, markers) || HasMarkedAudioFile(root, markers))
+                    return true;
+            }
+
+            if (HasMarkedPackageVersion(dataDir, markers))
+                return true;
+        }
+
+        return HasMarkedPackageVersion(installPath, markers);
+    }
+
+    private static bool HasMarkedDirectoryWithFiles(string root, string[] markers)
+    {
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories).Take(4096))
+            {
+                if (!ContainsAny(Path.GetFileName(dir), markers)) continue;
+                if (Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any())
+                    return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private static bool HasMarkedAudioFile(string root, string[] markers)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Take(12000))
+            {
+                if (ContainsAny(file, markers))
+                    return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private static bool HasMarkedPackageVersion(string root, string[] markers)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(root, "*pkg_version*", SearchOption.AllDirectories).Take(256))
+            {
+                if (ContainsAny(Path.GetFileName(file), markers))
+                    return true;
                 try
                 {
-                    if (Directory.EnumerateFiles(audioPath, "*", SearchOption.AllDirectories).Any())
-                    { installed = true; break; }
+                    if (ContainsAny(File.ReadAllText(file), markers))
+                        return true;
                 }
                 catch { }
             }
-            result.Add(new AudioPackInfo { Field = field, DisplayName = field, IsInstalled = installed });
         }
-        return result;
+        catch { }
+        return false;
+    }
+
+    private static bool ContainsAny(string value, string[] markers)
+    {
+        foreach (var marker in markers)
+        {
+            if (value.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private static string FormatSpeed(long bps) { const double KB = 1024, MB = 1024 * 1024; return bps >= MB ? $"{bps / MB:F1} MB/s" : bps >= KB ? $"{bps / KB:F1} KB/s" : $"{bps} B/s"; }
@@ -1034,4 +1354,6 @@ public class AudioPackInfo
     public string Field { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public bool IsInstalled { get; set; }
+    public string ButtonText => IsInstalled ? "已安装" : "安装";
+    public bool CanInstall => !IsInstalled;
 }

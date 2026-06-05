@@ -12,9 +12,9 @@ namespace GenShin_Launcher_Plus.Helper
         public static async Task<JsonElement> GetAPIData(string url)
         {
             using var client = new HttpClient();
-            var response = await client.GetAsync(url);
+            var response = await client.GetAsync(url).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            string responseBody = await response.Content.ReadAsStringAsync();
+            string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
             var doc = JsonDocument.Parse(responseBody);
             return doc.RootElement.Clone();
         }
@@ -24,7 +24,7 @@ namespace GenShin_Launcher_Plus.Helper
             const string url = "https://api.nahidaya.top/API/genshinimpact.php";
             try
             {
-                var data = await GetAPIData(url);
+                var data = await GetAPIData(url).ConfigureAwait(false);
                 var result = data.GetProperty(tag).ToString();
                 Logger.Debug($"Info from API ({tag}): {result}", "API");
                 return result;
@@ -54,7 +54,7 @@ namespace GenShin_Launcher_Plus.Helper
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
                 client.Timeout = TimeSpan.FromSeconds(15);
 
-                var response = await client.GetAsync(url);
+                var response = await client.GetAsync(url).ConfigureAwait(false);
                 var location = response.Headers.Location;
                 if (location != null)
                 {
@@ -77,7 +77,7 @@ namespace GenShin_Launcher_Plus.Helper
             string url = $"https://hyp-api.mihoyo.com/hyp/hyp-connect/api/getAllGameBasicInfo?launcher_id={profile.ApiLauncherId}&language=zh-cn";
             try
             {
-                var data = await GetAPIData(url);
+                var data = await GetAPIData(url).ConfigureAwait(false);
                 var list = data.GetProperty("data").GetProperty("game_info_list");
                 for (int i = 0; i < list.GetArrayLength(); i++)
                 {
@@ -113,7 +113,7 @@ namespace GenShin_Launcher_Plus.Helper
             string url = $"https://hyp-api.mihoyo.com/hyp/hyp-connect/api/getGameBranches?launcher_id={profile.ApiLauncherId}&language=zh-cn&game_ids[]={profile.ApiGameId}";
             try
             {
-                var data = await GetAPIData(url);
+                var data = await GetAPIData(url).ConfigureAwait(false);
                 var version = data.GetProperty("data")
                    .GetProperty("game_branches")[0]
                    .GetProperty("main")
