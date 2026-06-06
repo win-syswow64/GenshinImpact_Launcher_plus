@@ -1,13 +1,19 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 using GenShin_Launcher_Plus.Helper;
 using GenShin_Launcher_Plus.Models;
+using LibVLCSharp.Shared;
 
 namespace GenShin_Launcher_Plus.Service
 {
@@ -35,6 +41,8 @@ namespace GenShin_Launcher_Plus.Service
         public static void ClearApiCache() => _apiCache.Clear();
 
         private static string CacheFolder => Path.Combine(AppContext.BaseDirectory, "Config", "Backgrounds");
+        private const string VideoCacheFolderName = "VideoCache";
+        private static readonly TimeSpan VideoConvertTimeout = TimeSpan.FromMinutes(10);
 
         // ---- Server-aware API parameter mapping (from Starward) ----
 
@@ -302,17 +310,27 @@ namespace GenShin_Launcher_Plus.Service
 
             string fileName = GetFileNameFromUrl(url);
             string filePath = Path.Combine(folder, fileName);
+            string metaPath = GetSourceMetaPath(filePath);
 
-            // If the exact filename already exists locally and is valid, skip download
             if (File.Exists(filePath) && new FileInfo(filePath).Length > 1024)
             {
-                Logger.Debug("Cache hit (filename match): " + filePath, "BG");
-                return filePath;
+                var metadata = ReadJsonFile<BackgroundFileMetadata>(metaPath);
+                if (metadata != null && string.Equals(metadata.Url, url, StringComparison.Ordinal))
+                {
+                    Logger.Debug("Cache hit: " + filePath, "BG");
+                    return filePath;
+                }
+
+                Logger.Debug(metadata == null
+                    ? "Cache metadata missing, refreshing: " + filePath
+                    : "Cache URL changed, refreshing: " + filePath, "BG");
+                DeleteFileQuietly(filePath);
+                DeleteFileQuietly(metaPath);
+                DeleteConvertedVideosForSource(folder, filePath);
             }
 
-            // Filename mismatch: clean up only the stale file (partial download or old cache)
-            // before downloading the new one. Other valid cached files are left intact.
-            try { File.Delete(filePath); } catch { }
+            DeleteFileQuietly(filePath);
+            DeleteFileQuietly(metaPath);
 
             try
             {
@@ -330,24 +348,14 @@ namespace GenShin_Launcher_Plus.Service
                 {
                     fileName = Path.GetFileNameWithoutExtension(fileName) + ext;
                     filePath = Path.Combine(folder, fileName);
+                    metaPath = GetSourceMetaPath(filePath);
+                    DeleteFileQuietly(filePath);
+                    DeleteFileQuietly(metaPath);
                 }
 
                 await File.WriteAllBytesAsync(filePath, bytes);
+                WriteSourceMetadata(metaPath, url);
                 Logger.Debug("Cached: " + filePath + " (" + bytes.Length + " bytes)", "Background");
-
-                // Remove other stale files in this game's cache folder
-                try
-                {
-                    foreach (var old in Directory.GetFiles(folder))
-                    {
-                        if (!string.Equals(old, filePath, StringComparison.OrdinalIgnoreCase))
-                        {
-                            try { File.Delete(old); Logger.Debug("Removed stale cache: " + old, "BG"); }
-                            catch { }
-                        }
-                    }
-                }
-                catch { }
 
                 return filePath;
             }
@@ -356,6 +364,400 @@ namespace GenShin_Launcher_Plus.Service
                 Logger.Warn("Failed to download background: " + ex.Message, "Background");
                 return null;
             }
+        }
+
+        public static async Task<string> PreparePlayableVideoAsync(string sourcePath, string gameId, string? sourceUrl = null)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+                return sourcePath;
+
+            var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+            if (ext == ".mp4")
+                return sourcePath;
+            if (ext is not ".webm" and not ".mkv")
+                return sourcePath;
+
+            var sourceStamp = VideoSourceStamp.FromFile(sourcePath, sourceUrl);
+            if (sourceStamp == null)
+                return sourcePath;
+
+            string cacheFolder = GetVideoCacheFolder(gameId);
+            Directory.CreateDirectory(cacheFolder);
+
+            string cacheKey = BuildVideoCacheKey(sourceStamp);
+            string mp4Path = Path.Combine(cacheFolder, cacheKey + ".mp4");
+            string metaPath = GetConvertedVideoMetaPath(mp4Path);
+
+            CleanupConvertedVideoCache(cacheFolder, mp4Path);
+
+            if (IsConvertedVideoFresh(mp4Path, metaPath, sourceStamp))
+            {
+                Logger.Debug("MP4 video cache hit: " + mp4Path, "BG");
+                return mp4Path;
+            }
+
+            DeleteFileQuietly(mp4Path);
+            DeleteFileQuietly(metaPath);
+
+            Logger.Debug("Converting background video to MP4: " + sourcePath, "BG");
+            bool converted = await TryConvertVideoToMp4Async(sourcePath, mp4Path).ConfigureAwait(false);
+            if (!converted)
+            {
+                Logger.Warn("MP4 conversion failed, using original video: " + sourcePath, "BG");
+                return sourcePath;
+            }
+
+            WriteJsonFile(metaPath, ConvertedVideoMetadata.FromStamp(sourceStamp));
+            Logger.Debug("MP4 video cache ready: " + mp4Path, "BG");
+            return mp4Path;
+        }
+
+        public static void CleanupUnusedBackgroundCache(string gameId, IEnumerable<string?> keepFiles)
+        {
+            string folder = Path.Combine(CacheFolder, gameId);
+            if (!Directory.Exists(folder)) return;
+
+            var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in keepFiles)
+            {
+                if (string.IsNullOrWhiteSpace(file)) continue;
+                try
+                {
+                    string full = Path.GetFullPath(file);
+                    keep.Add(full);
+                    keep.Add(GetSourceMetaPath(full));
+                    keep.Add(GetConvertedVideoMetaPath(full));
+                }
+                catch { }
+            }
+
+            try
+            {
+                foreach (var file in Directory.GetFiles(folder))
+                {
+                    string full = Path.GetFullPath(file);
+                    if (keep.Contains(full)) continue;
+                    DeleteFileQuietly(full);
+                    Logger.Debug("Removed stale background cache: " + full, "BG");
+                }
+            }
+            catch { }
+
+            CleanupConvertedVideoCache(GetVideoCacheFolder(gameId), keep);
+        }
+
+        private static async Task<bool> TryConvertVideoToMp4Async(string sourcePath, string mp4Path)
+        {
+            string? dir = Path.GetDirectoryName(mp4Path);
+            if (string.IsNullOrEmpty(dir)) return false;
+            Directory.CreateDirectory(dir);
+
+            string tempPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(mp4Path) + ".tmp.mp4");
+            DeleteFileQuietly(tempPath);
+
+            if (await TryConvertWithFfmpegAsync(sourcePath, tempPath).ConfigureAwait(false))
+            {
+                ReplaceFile(tempPath, mp4Path);
+                return IsUsableMediaFile(mp4Path);
+            }
+
+            DeleteFileQuietly(tempPath);
+            if (await TryConvertWithLibVlcAsync(sourcePath, tempPath).ConfigureAwait(false))
+            {
+                ReplaceFile(tempPath, mp4Path);
+                return IsUsableMediaFile(mp4Path);
+            }
+
+            DeleteFileQuietly(tempPath);
+            return false;
+        }
+
+        private static async Task<bool> TryConvertWithFfmpegAsync(string sourcePath, string tempPath)
+        {
+            string? ffmpeg = FindFfmpegExecutable();
+            if (ffmpeg == null) return false;
+
+            try
+            {
+                using var process = new Process();
+                process.StartInfo = new ProcessStartInfo
+                {
+                    FileName = ffmpeg,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true,
+                };
+                process.StartInfo.ArgumentList.Add("-y");
+                process.StartInfo.ArgumentList.Add("-hide_banner");
+                process.StartInfo.ArgumentList.Add("-loglevel");
+                process.StartInfo.ArgumentList.Add("error");
+                process.StartInfo.ArgumentList.Add("-i");
+                process.StartInfo.ArgumentList.Add(sourcePath);
+                process.StartInfo.ArgumentList.Add("-an");
+                process.StartInfo.ArgumentList.Add("-c:v");
+                process.StartInfo.ArgumentList.Add("libx264");
+                process.StartInfo.ArgumentList.Add("-preset");
+                process.StartInfo.ArgumentList.Add("veryfast");
+                process.StartInfo.ArgumentList.Add("-crf");
+                process.StartInfo.ArgumentList.Add("23");
+                process.StartInfo.ArgumentList.Add("-pix_fmt");
+                process.StartInfo.ArgumentList.Add("yuv420p");
+                process.StartInfo.ArgumentList.Add("-movflags");
+                process.StartInfo.ArgumentList.Add("+faststart");
+                process.StartInfo.ArgumentList.Add(tempPath);
+
+                if (!process.Start())
+                    return false;
+
+                var stdOutTask = process.StandardOutput.ReadToEndAsync();
+                var stdErrTask = process.StandardError.ReadToEndAsync();
+                var waitTask = process.WaitForExitAsync();
+                if (await Task.WhenAny(waitTask, Task.Delay(VideoConvertTimeout)).ConfigureAwait(false) != waitTask)
+                {
+                    TryKillProcess(process);
+                    Logger.Warn("ffmpeg conversion timeout", "BG");
+                    return false;
+                }
+
+                string stderr = await stdErrTask.ConfigureAwait(false);
+                _ = await stdOutTask.ConfigureAwait(false);
+                if (process.ExitCode != 0)
+                {
+                    Logger.Warn("ffmpeg conversion failed: " + stderr.Trim(), "BG");
+                    return false;
+                }
+
+                return IsUsableMediaFile(tempPath);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("ffmpeg conversion exception: " + ex.Message, "BG");
+                return false;
+            }
+        }
+
+        private static async Task<bool> TryConvertWithLibVlcAsync(string sourcePath, string tempPath)
+        {
+            try
+            {
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                using var libVLC = new LibVLC("--quiet", "--no-video-title-show", "--no-stats");
+                using var media = new Media(libVLC, new Uri(sourcePath));
+                media.AddOption(":no-audio");
+                media.AddOption(":sout=#transcode{vcodec=h264,vb=6000,acodec=none}:std{access=file,mux=mp4,dst='" + EscapeVlcSoutPath(tempPath) + "'}");
+                media.AddOption(":no-sout-all");
+
+                using var player = new LibVLCSharp.Shared.MediaPlayer(libVLC);
+                EventHandler<EventArgs> ended = (_, _) => tcs.TrySetResult(true);
+                EventHandler<EventArgs> error = (_, _) => tcs.TrySetResult(false);
+                player.EndReached += ended;
+                player.EncounteredError += error;
+
+                try
+                {
+                    if (!player.Play(media))
+                        return false;
+
+                    if (await Task.WhenAny(tcs.Task, Task.Delay(VideoConvertTimeout)).ConfigureAwait(false) != tcs.Task)
+                    {
+                        Logger.Warn("LibVLC conversion timeout", "BG");
+                        return false;
+                    }
+
+                    return await tcs.Task.ConfigureAwait(false) && IsUsableMediaFile(tempPath);
+                }
+                finally
+                {
+                    player.EndReached -= ended;
+                    player.EncounteredError -= error;
+                    try { player.Stop(); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("LibVLC conversion exception: " + ex.Message, "BG");
+                return false;
+            }
+        }
+
+        private static string? FindFfmpegExecutable()
+        {
+            string[] localCandidates =
+            {
+                Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe"),
+                Path.Combine(AppContext.BaseDirectory, "Tools", "ffmpeg.exe"),
+                Path.Combine(AppContext.BaseDirectory, "Bin", "ffmpeg.exe"),
+            };
+            foreach (var candidate in localCandidates)
+                if (File.Exists(candidate)) return candidate;
+
+            string? path = Environment.GetEnvironmentVariable("PATH");
+            if (string.IsNullOrWhiteSpace(path)) return null;
+
+            foreach (var dir in path.Split(Path.PathSeparator))
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(dir)) continue;
+                    string candidate = Path.Combine(dir.Trim(), "ffmpeg.exe");
+                    if (File.Exists(candidate)) return candidate;
+                }
+                catch { }
+            }
+
+            return null;
+        }
+
+        private static bool IsConvertedVideoFresh(string mp4Path, string metaPath, VideoSourceStamp sourceStamp)
+        {
+            if (!IsUsableMediaFile(mp4Path)) return false;
+            var metadata = ReadJsonFile<ConvertedVideoMetadata>(metaPath);
+            return metadata != null && metadata.Matches(sourceStamp);
+        }
+
+        private static bool IsUsableMediaFile(string path)
+        {
+            try { return File.Exists(path) && new FileInfo(path).Length > 1024 * 64; }
+            catch { return false; }
+        }
+
+        private static string BuildVideoCacheKey(VideoSourceStamp stamp)
+        {
+            string raw = string.Join("|", stamp.SourcePath, stamp.SourceUrl, stamp.Length, stamp.LastWriteUtcTicks);
+            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        private static string GetVideoCacheFolder(string gameId)
+        {
+            return Path.Combine(CacheFolder, gameId, VideoCacheFolderName);
+        }
+
+        private static string GetSourceMetaPath(string filePath)
+        {
+            return filePath + ".meta.json";
+        }
+
+        private static string GetConvertedVideoMetaPath(string mp4Path)
+        {
+            return mp4Path + ".json";
+        }
+
+        private static void DeleteConvertedVideosForSource(string backgroundFolder, string sourcePath)
+        {
+            string videoCacheFolder = Path.Combine(backgroundFolder, VideoCacheFolderName);
+            if (!Directory.Exists(videoCacheFolder)) return;
+            string normalizedSource = NormalizePath(sourcePath);
+
+            try
+            {
+                foreach (var metaPath in Directory.GetFiles(videoCacheFolder, "*.mp4.json"))
+                {
+                    var metadata = ReadJsonFile<ConvertedVideoMetadata>(metaPath);
+                    if (metadata == null || !string.Equals(metadata.SourcePath, normalizedSource, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    string mp4Path = metaPath[..^5];
+                    DeleteFileQuietly(mp4Path);
+                    DeleteFileQuietly(metaPath);
+                }
+            }
+            catch { }
+        }
+
+        private static void CleanupConvertedVideoCache(string videoCacheFolder, string? keepMp4Path)
+        {
+            var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(keepMp4Path))
+            {
+                string full = Path.GetFullPath(keepMp4Path);
+                keep.Add(full);
+                keep.Add(GetConvertedVideoMetaPath(full));
+            }
+            CleanupConvertedVideoCache(videoCacheFolder, keep);
+        }
+
+        private static void CleanupConvertedVideoCache(string videoCacheFolder, HashSet<string> keep)
+        {
+            if (!Directory.Exists(videoCacheFolder)) return;
+            try
+            {
+                foreach (var file in Directory.GetFiles(videoCacheFolder))
+                {
+                    string full = Path.GetFullPath(file);
+                    if (keep.Contains(full)) continue;
+                    DeleteFileQuietly(full);
+                    Logger.Debug("Removed stale MP4 cache: " + full, "BG");
+                }
+            }
+            catch { }
+        }
+
+        private static void WriteSourceMetadata(string metaPath, string url)
+        {
+            WriteJsonFile(metaPath, new BackgroundFileMetadata
+            {
+                Url = url,
+                CachedAtUtc = DateTime.UtcNow,
+            });
+        }
+
+        private static T? ReadJsonFile<T>(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return default;
+                return JsonSerializer.Deserialize<T>(File.ReadAllText(path));
+            }
+            catch { return default; }
+        }
+
+        private static void WriteJsonFile<T>(string path, T value)
+        {
+            try
+            {
+                string? dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                File.WriteAllText(path, JsonSerializer.Serialize(value));
+            }
+            catch { }
+        }
+
+        private static void ReplaceFile(string sourcePath, string targetPath)
+        {
+            DeleteFileQuietly(targetPath);
+            File.Move(sourcePath, targetPath);
+        }
+
+        private static void DeleteFileQuietly(string path)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch { }
+        }
+
+        private static void TryKillProcess(Process process)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch { }
+        }
+
+        private static string EscapeVlcSoutPath(string path)
+        {
+            return Path.GetFullPath(path).Replace('\\', '/').Replace("'", "\\'");
+        }
+
+        private static string NormalizePath(string path)
+        {
+            try { return Path.GetFullPath(path); }
+            catch { return path; }
         }
 
         /// <summary>
@@ -461,6 +863,78 @@ namespace GenShin_Launcher_Plus.Service
             catch
             {
                 return Guid.NewGuid().ToString("N") + ".jpg";
+            }
+        }
+
+        private sealed class BackgroundFileMetadata
+        {
+            [JsonPropertyName("url")]
+            public string Url { get; set; } = "";
+
+            [JsonPropertyName("cached_at_utc")]
+            public DateTime CachedAtUtc { get; set; }
+        }
+
+        private sealed class VideoSourceStamp
+        {
+            public string SourcePath { get; init; } = "";
+            public string SourceUrl { get; init; } = "";
+            public long Length { get; init; }
+            public long LastWriteUtcTicks { get; init; }
+
+            public static VideoSourceStamp? FromFile(string sourcePath, string? sourceUrl)
+            {
+                try
+                {
+                    var file = new FileInfo(sourcePath);
+                    if (!file.Exists || file.Length <= 0) return null;
+                    return new VideoSourceStamp
+                    {
+                        SourcePath = NormalizePath(sourcePath),
+                        SourceUrl = sourceUrl ?? "",
+                        Length = file.Length,
+                        LastWriteUtcTicks = file.LastWriteTimeUtc.Ticks,
+                    };
+                }
+                catch { return null; }
+            }
+        }
+
+        private sealed class ConvertedVideoMetadata
+        {
+            [JsonPropertyName("source_path")]
+            public string SourcePath { get; set; } = "";
+
+            [JsonPropertyName("source_url")]
+            public string SourceUrl { get; set; } = "";
+
+            [JsonPropertyName("source_length")]
+            public long SourceLength { get; set; }
+
+            [JsonPropertyName("source_last_write_utc_ticks")]
+            public long SourceLastWriteUtcTicks { get; set; }
+
+            [JsonPropertyName("converted_at_utc")]
+            public DateTime ConvertedAtUtc { get; set; }
+
+            public static ConvertedVideoMetadata FromStamp(VideoSourceStamp stamp)
+            {
+                return new ConvertedVideoMetadata
+                {
+                    SourcePath = stamp.SourcePath,
+                    SourceUrl = stamp.SourceUrl,
+                    SourceLength = stamp.Length,
+                    SourceLastWriteUtcTicks = stamp.LastWriteUtcTicks,
+                    ConvertedAtUtc = DateTime.UtcNow,
+                };
+            }
+
+            public bool Matches(VideoSourceStamp stamp)
+            {
+                return string.Equals(SourcePath, stamp.SourcePath, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(SourceUrl, stamp.SourceUrl, StringComparison.Ordinal)
+                    && SourceLength == stamp.Length
+                    && SourceLastWriteUtcTicks == stamp.LastWriteUtcTicks;
             }
         }
     }

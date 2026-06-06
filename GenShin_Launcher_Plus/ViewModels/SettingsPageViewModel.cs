@@ -326,20 +326,35 @@ namespace GenShin_Launcher_Plus.ViewModels
                 App.Current.DataModel.SetCustomBackground(profile.Id, "");
                 App.Current.DataModel.SetSelectedBackgroundId(profile.Id, item.Id);
 
-                // Cache the file
+                var selected = (await BackgroundService.FetchBackgroundsAsync(profile)).FirstOrDefault(b => b.Id == item.Id);
                 string url = item.IsVideo
-                    ? (await BackgroundService.FetchBackgroundsAsync(profile)).FirstOrDefault(b => b.Id == item.Id)?.Video?.Url
+                    ? selected?.Video?.Url
                     : item.DisplayUrl;
 
                 if (!string.IsNullOrEmpty(url))
                 {
-                    string cached = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id);
+                    string? cached = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id);
                     if (!string.IsNullOrEmpty(cached))
                     {
                         if (item.IsVideo)
-                            App.Current.ThisMainWindow.SetBackgroundVideo(cached);
+                        {
+                            string? themePath = null;
+                            if (!string.IsNullOrEmpty(selected?.Theme?.Url))
+                                themePath = await BackgroundService.CacheBackgroundFileAsync(selected.Theme.Url, profile.Id);
+
+                            string? fallbackPath = null;
+                            if (!string.IsNullOrEmpty(selected?.Background?.Url))
+                                fallbackPath = await BackgroundService.CacheBackgroundFileAsync(selected.Background.Url, profile.Id);
+
+                            string playbackPath = await BackgroundService.PreparePlayableVideoAsync(cached, profile.Id, selected?.Video?.Url);
+                            App.Current.ThisMainWindow.SetBackgroundVideo(playbackPath, themePath, fallbackPath);
+                            BackgroundService.CleanupUnusedBackgroundCache(profile.Id, new[] { cached, themePath, fallbackPath, playbackPath });
+                        }
                         else
+                        {
                             App.Current.ThisMainWindow.SetBackgroundImage(cached);
+                            BackgroundService.CleanupUnusedBackgroundCache(profile.Id, new[] { cached });
+                        }
                     }
                 }
             }
@@ -367,7 +382,18 @@ namespace GenShin_Launcher_Plus.ViewModels
                 CustomBackgroundPath = dialog.FileName;
 
                 if (BackgroundService.IsVideoFile(dialog.FileName))
-                    App.Current.ThisMainWindow.SetBackgroundVideo(dialog.FileName);
+                {
+                    string selectedPath = dialog.FileName;
+                    _ = Task.Run(async () =>
+                    {
+                        string playbackPath = await BackgroundService.PreparePlayableVideoAsync(selectedPath, profile.Id, selectedPath);
+                        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                        {
+                            if (App.Current.DataModel.GetCustomBackground(profile.Id) == selectedPath)
+                                App.Current.ThisMainWindow.SetBackgroundVideo(playbackPath);
+                        });
+                    });
+                }
                 else
                     App.Current.ThisMainWindow.SetBackgroundImage(dialog.FileName);
             }

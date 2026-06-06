@@ -88,7 +88,11 @@ namespace GenShin_Launcher_Plus.Service
                 Logger.Debug("Using custom background: " + customBg, "BG");
                 if (!IsStillActive()) return;
                 if (BackgroundService.IsVideoFile(customBg))
-                    System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(customBg));
+                {
+                    var playable = await BackgroundService.PreparePlayableVideoAsync(customBg, profile.Id, customBg);
+                    if (!IsStillActive()) return;
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(playable));
+                }
                 else
                     System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundImage(customBg));
                 return;
@@ -101,7 +105,11 @@ namespace GenShin_Launcher_Plus.Service
                 Logger.Debug("Using legacy background: " + legacyBg, "BG");
                 if (!IsStillActive()) return;
                 if (BackgroundService.IsVideoFile(legacyBg))
-                    System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(legacyBg));
+                {
+                    var playable = await BackgroundService.PreparePlayableVideoAsync(legacyBg, profile.Id, legacyBg);
+                    if (!IsStillActive()) return;
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(playable));
+                }
                 else
                     System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundImage(legacyBg));
                 return;
@@ -175,9 +183,12 @@ namespace GenShin_Launcher_Plus.Service
                 if (selected.Background != null && !string.IsNullOrEmpty(selected.Background.Url))
                     fallbackPath = await BackgroundService.CacheBackgroundFileAsync(selected.Background.Url, profile.Id);
                 if (!IsStillActive()) return;
-                Logger.Debug("Setting VIDEO bg: video=" + cacheFile + " theme=" + themePath + " fallback=" + fallbackPath, "BG");
+                string playbackPath = await BackgroundService.PreparePlayableVideoAsync(cacheFile, profile.Id, selected.Video?.Url);
+                if (!IsStillActive()) return;
+                Logger.Debug("Setting VIDEO bg: video=" + playbackPath + " source=" + cacheFile + " theme=" + themePath + " fallback=" + fallbackPath, "BG");
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                    main.SetBackgroundVideo(cacheFile, themePath, fallbackPath));
+                    main.SetBackgroundVideo(playbackPath, themePath, fallbackPath));
+                BackgroundService.CleanupUnusedBackgroundCache(profile.Id, new[] { cacheFile, themePath, fallbackPath, playbackPath });
             }
             else
             {
@@ -185,6 +196,7 @@ namespace GenShin_Launcher_Plus.Service
                 if (!IsStillActive()) return;
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                     main.SetBackgroundImage(cacheFile));
+                BackgroundService.CleanupUnusedBackgroundCache(profile.Id, new[] { cacheFile });
             }
 
             if (!selected.IsCustom && !string.IsNullOrEmpty(selected.Id))
