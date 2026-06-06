@@ -148,6 +148,46 @@ public class GameLaunchConfig
     public string DefaultDownloadMode { get; set; }
 }
 
+// === Game Channel SDK ===
+
+public class GameChannelSdkResponse
+{
+    [JsonPropertyName("game_channel_sdks")]
+    public List<GameChannelSdkInfo> GameChannelSDKs { get; set; }
+}
+
+public class GameChannelSdkInfo
+{
+    [JsonPropertyName("game")]
+    public GameIdInfo Game { get; set; }
+
+    [JsonPropertyName("version")]
+    public string Version { get; set; }
+
+    [JsonPropertyName("channel_sdk_pkg")]
+    public GameChannelSdkPackage ChannelSDKPackage { get; set; }
+
+    [JsonPropertyName("pkg_version_file_name")]
+    public string PkgVersionFileName { get; set; }
+}
+
+public class GameChannelSdkPackage
+{
+    [JsonPropertyName("url")]
+    public string Url { get; set; }
+
+    [JsonPropertyName("md5")]
+    public string MD5 { get; set; }
+
+    [JsonPropertyName("size")]
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.WriteAsString)]
+    public long Size { get; set; }
+
+    [JsonPropertyName("decompressed_size")]
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.WriteAsString)]
+    public long DecompressedSize { get; set; }
+}
+
 // === Sophon Chunk Build (from downloader API) ===
 
 public class SophonChunkBuildResponse

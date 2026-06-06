@@ -79,6 +79,26 @@ public static class HoYoPlayApiService
         return (null, null);
     }
 
+    public static async Task<GameChannelSdkInfo?> GetGameChannelSDKAsync(string gameBiz, CancellationToken ct = default)
+    {
+        try
+        {
+            var launcherId = HoYoPlayGameMap.GetLauncherId(gameBiz);
+            var gameId = HoYoPlayGameMap.GetApiGameId(gameBiz);
+            var baseUrl = HoYoPlayGameMap.GetApiBaseUrl(gameBiz);
+            if (launcherId == null || gameId == null) return null;
+
+            var (channel, subChannel) = HoYoPlayGameMap.GetChannelInfo(gameBiz);
+            var url = $"{baseUrl}getGameChannelSDKs?launcher_id={launcherId}&language=zh-cn&game_ids[]={gameId}&channel={channel}&sub_channel={subChannel}";
+            Logger.Debug($"Fetching game channel SDK: {url}", "HoYoPlay");
+            var json = await _httpClient.GetStringAsync(url, ct).ConfigureAwait(false);
+            var resp = JsonSerializer.Deserialize<HoYoApiResponse<GameChannelSdkResponse>>(json, _jsonOptions);
+            if (resp?.Retcode != 0) { Logger.Warn($"GetGameChannelSDK error: {resp?.Retcode} {resp?.Message}", "HoYoPlay"); return null; }
+            return resp?.Data?.GameChannelSDKs?.FirstOrDefault(x => x.Game?.Id == gameId);
+        }
+        catch (Exception ex) { Logger.Warn($"GetGameChannelSDK: {ex.Message}", "HoYoPlay"); return null; }
+    }
+
     /// <summary>
     /// Get Sophon chunk build from downloader API
     /// </summary>

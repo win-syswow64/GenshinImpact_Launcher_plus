@@ -42,7 +42,11 @@ namespace GenShin_Launcher_Plus.Service
 
             // Apply server config before launching (Starward-style)
             var configService = new GameConfigService(profile, biz, gamePath);
-            configService.ApplyServerConfig();
+            if (!await configService.ApplyServerConfigAsync())
+            {
+                DialogHelper.ShowWarning("Bilibili 登录 SDK 下载失败，请检查网络后重试。", App.Current.Language.Error);
+                return;
+            }
 
             string arg = new CommandLineBuilder()
                 .AppendIf("-popupwindow", App.Current.DataModel.IsPopup)

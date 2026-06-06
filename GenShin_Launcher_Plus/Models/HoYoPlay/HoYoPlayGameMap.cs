@@ -53,6 +53,15 @@ public static class HoYoPlayGameMap
         return "https://downloader-api.mihoyo.com/downloader/sophon_chunk/api/";
     }
 
+    public static (int Channel, int SubChannel) GetChannelInfo(string gameBiz)
+    {
+        if (gameBiz.EndsWith("_bilibili"))
+            return (14, 0);
+        if (gameBiz.EndsWith("_global"))
+            return (1, 0);
+        return (1, 1);
+    }
+
     /// <summary>
     /// Map launcher gameBiz to HoYoPlay internal biz string
     /// </summary>
