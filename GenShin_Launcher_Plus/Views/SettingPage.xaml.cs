@@ -12,7 +12,7 @@ namespace GenShin_Launcher_Plus.Views
         public SettingPage(int tabIndex = 0)
         {
             InitializeComponent();
-            DataContext = new SettingsPageViewModel(tabIndex);
+            DataContext = App.Current.Services.CreateSettingsPageViewModel(tabIndex);
             Loaded += SettingPage_Loaded;
         }
 

@@ -13,22 +13,26 @@ namespace GenShin_Launcher_Plus.Service
 {
     public class LaunchService : ILaunchService
     {
-        public LaunchService()
+        private readonly ILauncherSession _session;
+        private readonly IUserDataService _userDataService;
+
+        public LaunchService(ILauncherSession session, IUserDataService userDataService)
         {
-            ReadUserList();
+            _session = session;
+            _userDataService = userDataService;
         }
 
         public async Task RunGameAsync()
         {
-            var biz = App.Current.DataModel.ActiveBiz;
-            var profile = App.Current.DataModel.ActiveGame;
+            var biz = _session.Data.ActiveBiz;
+            var profile = _session.Data.ActiveGame;
             if (profile == null)
             {
                 Logger.Error("ActiveGame is null for {biz}", "Launch");
-                DialogHelper.ShowWarning(App.Current.Language.PathErrorMessageStr, App.Current.Language.Error);
+                DialogHelper.ShowWarning(_session.Language!.PathErrorMessageStr, _session.Language.Error);
                 return;
             }
-            var gamePath = App.Current.DataModel.GamePath;
+            var gamePath = _session.Data.GamePath;
 
             string exeName = profile.GetExeName(biz);
             string gameMain = Path.Combine(gamePath, exeName);
@@ -36,7 +40,7 @@ namespace GenShin_Launcher_Plus.Service
             if (!File.Exists(gameMain))
             {
                 Logger.Warn($"Game executable not found: {gameMain}", "Launch");
-                DialogHelper.ShowWarning(App.Current.Language.PathErrorMessageStr, App.Current.Language.Error);
+                DialogHelper.ShowWarning(_session.Language!.PathErrorMessageStr, _session.Language.Error);
                 return;
             }
 
@@ -44,15 +48,15 @@ namespace GenShin_Launcher_Plus.Service
             var configService = new GameConfigService(profile, biz, gamePath);
             if (!await configService.ApplyServerConfigAsync())
             {
-                DialogHelper.ShowWarning("Bilibili 登录 SDK 下载失败，请检查网络后重试。", App.Current.Language.Error);
+                DialogHelper.ShowWarning("Bilibili 登录 SDK 下载失败，请检查网络后重试。", _session.Language!.Error);
                 return;
             }
 
             string arg = new CommandLineBuilder()
-                .AppendIf("-popupwindow", App.Current.DataModel.IsPopup)
-                .Append("-screen-fullscreen", App.Current.DataModel.FullSize)
-                .Append("-screen-height", App.Current.DataModel.Height)
-                .Append("-screen-width", App.Current.DataModel.Width)
+                .AppendIf("-popupwindow", _session.Data.IsPopup)
+                .Append("-screen-fullscreen", _session.Data.FullSize)
+                .Append("-screen-height", _session.Data.Height)
+                .Append("-screen-width", _session.Data.Width)
                 .ToString();
 
             Logger.Info($"Starting game: {gameMain} ({biz}) with args: {arg}", "Launch");
@@ -72,7 +76,7 @@ namespace GenShin_Launcher_Plus.Service
 
             bool started = process.Start();
 
-            if (App.Current.DataModel.IsRunThenClose)
+            if (_session.Data.IsRunThenClose)
             {
                 Logger.Info("Game started, exiting launcher (run-then-close)", "Launch");
                 Environment.Exit(0);
@@ -92,8 +96,8 @@ namespace GenShin_Launcher_Plus.Service
 
         public void ReadUserList()
         {
-            App.Current.NoticeOverAllBase.UserLists = new UserDataService().ReadUserList()
-                .FindAll(x => string.Equals(x.GameBiz, App.Current.DataModel.ActiveGameBiz, System.StringComparison.OrdinalIgnoreCase));
+            _session.AccountOverlay!.UserLists = _userDataService.ReadUserList()
+                .FindAll(x => string.Equals(x.GameBiz, _session.Data.ActiveGameBiz, System.StringComparison.OrdinalIgnoreCase));
         }
     }
 }

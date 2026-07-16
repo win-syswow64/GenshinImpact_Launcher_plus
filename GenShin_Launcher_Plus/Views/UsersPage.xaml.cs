@@ -8,7 +8,7 @@ namespace GenShin_Launcher_Plus.Views
         public UsersPage()
         {
             InitializeComponent();
-            DataContext = new UsersPageViewModel();
+            DataContext = App.Current.Services.CreateUsersPageViewModel();
         }
     }
 }

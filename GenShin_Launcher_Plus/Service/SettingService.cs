@@ -10,7 +10,7 @@ namespace GenShin_Launcher_Plus.Service
 {
     public class SettingService : ISettingService
     {
-        public SettingService(SettingsPageViewModel vm)
+        public void Initialize(SettingsPageViewModel vm)
         {
             vm.Width = App.Current.DataModel.Width ?? "1600";
             vm.Height = App.Current.DataModel.Height ?? "900";

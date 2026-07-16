@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Linq;
 using GenShin_Launcher_Plus.Helper;
+using GenShin_Launcher_Plus.Core;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service.IService;
 using GenShin_Launcher_Plus.ViewModels;
@@ -13,8 +14,11 @@ namespace GenShin_Launcher_Plus.Service
     public class MainService : IMainWindowService
     {
         private static readonly System.Threading.SemaphoreSlim _bgSemaphore = new(1, 1);
-        public MainService(MainWindow main, MainWindowViewModel vm)
+        private readonly ILauncherSession _session;
+
+        public MainService(ILauncherSession session, MainWindow main, MainWindowViewModel vm)
         {
+            _session = session;
             CheckConfig(main);
             _ = MainBackgroundLoadAsync(vm);
         }
@@ -23,12 +27,12 @@ namespace GenShin_Launcher_Plus.Service
         {
             Logger.Debug("Checking for notices", "Main");
             string json = await HtmlHelper.GetInfoFromHtmlAsync("Notice");
-            App.Current.NoticeObject = JsonConvert.DeserializeObject<NoticeModel>(json) ?? new();
+            _session.Notice = JsonConvert.DeserializeObject<NoticeModel>(json) ?? new();
         }
 
         public async Task MainBackgroundLoadAsync(MainWindowViewModel vm)
         {
-            App.Current.IsLoadingBackground = true;
+            _session.IsLoadingBackground = true;
             Logger.Debug("Loading background", "Main");
             try
             {
@@ -40,14 +44,14 @@ namespace GenShin_Launcher_Plus.Service
                 Logger.Warn("Stack trace: " + ex.StackTrace, "Background");
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
-                    App.Current.ThisMainWindow.SetBackgroundResource(
+                    _session.MainWindow?.SetBackgroundResource(
                         "pack://application:,,,/Images/MainBackground.jpg");
                 });
             }
-            App.Current.IsLoadingBackground = false;
+            _session.IsLoadingBackground = false;
         }
 
-        public static async Task LoadGameBackgroundAsync()
+        public async Task LoadGameBackgroundAsync()
         {
             // Wait for any in-progress load to finish, then proceed.
             // Timeout prevents deadlock if the previous load is stuck.
@@ -67,22 +71,22 @@ namespace GenShin_Launcher_Plus.Service
             }
         }
 
-        private static async Task LoadGameBackgroundCoreAsync()
+        private async Task LoadGameBackgroundCoreAsync()
         {
-            var main = App.Current.ThisMainWindow;
+            var main = _session.MainWindow;
             if (main == null) { Logger.Debug("main is null, skip", "BG"); return; }
-            var profile = App.Current.DataModel.ActiveGame;
+            var profile = _session.Data.ActiveGame;
             if (profile == null) { Logger.Debug("profile is null, skip", "BG"); return; }
             var loadGameId = profile.Id;
-            var loadGameBiz = App.Current.DataModel.ActiveGameBiz;
+            var loadGameBiz = _session.Data.ActiveGameBiz;
             bool IsStillActive() =>
-                App.Current.DataModel.ActiveGameBiz == loadGameBiz &&
-                App.Current.DataModel.ActiveGame?.Id == loadGameId;
+                _session.Data.ActiveGameBiz == loadGameBiz &&
+                _session.Data.ActiveGame?.Id == loadGameId;
 
             Logger.Debug("LoadGameBackground: game=" + profile.Id + " biz=" + loadGameBiz, "BG");
 
             // 1. Per-game custom background file
-            string customBg = App.Current.DataModel.GetCustomBackground(profile.Id);
+            string customBg = _session.Data.GetCustomBackground(profile.Id);
             if (!string.IsNullOrEmpty(customBg) && File.Exists(customBg))
             {
                 Logger.Debug("Using custom background: " + customBg, "BG");
@@ -99,7 +103,7 @@ namespace GenShin_Launcher_Plus.Service
             }
 
             // 2. Legacy global custom background (backward compat)
-            string legacyBg = App.Current.DataModel.BackgroundPath;
+            string legacyBg = _session.Data.BackgroundPath;
             if (!string.IsNullOrEmpty(legacyBg) && File.Exists(legacyBg))
             {
                 Logger.Debug("Using legacy background: " + legacyBg, "BG");
@@ -117,7 +121,7 @@ namespace GenShin_Launcher_Plus.Service
 
             // 3. API backgrounds
             Logger.Debug("Fetching API backgrounds...", "BG");
-            var allBgs = await BackgroundService.FetchBackgroundsAsync(profile);
+            var allBgs = await BackgroundService.FetchBackgroundsAsync(profile, loadGameBiz);
             if (!IsStillActive()) return;
             Logger.Debug("Fetched " + allBgs.Count + " backgrounds from API", "BG");
 
@@ -200,7 +204,7 @@ namespace GenShin_Launcher_Plus.Service
             }
 
             if (!selected.IsCustom && !string.IsNullOrEmpty(selected.Id))
-                App.Current.DataModel.SetSelectedBackgroundId(profile.Id, selected.Id);
+                _session.Data.SetSelectedBackgroundId(profile.Id, selected.Id);
 
             Logger.Debug("Background loaded OK: " + selected.Id, "BG");
         }
@@ -210,22 +214,22 @@ namespace GenShin_Launcher_Plus.Service
             if (!Directory.Exists("UserData"))
                 Directory.CreateDirectory("UserData");
 
-            var game = App.Current.DataModel.ActiveGame;
+            var game = _session.Data.ActiveGame;
             if (game == null) return;
-            var gamePath = App.Current.DataModel.GamePath ?? "";
+            var gamePath = _session.Data.GamePath ?? "";
             if (!File.Exists(Path.Combine(gamePath, game.CnExeName)) &&
                 !File.Exists(Path.Combine(gamePath, game.GlobalExeName)))
             {
                 Logger.Info("Game path not configured, running auto-search", "Main");
-                var biz = App.Current.DataModel.ActiveBiz;
+                var biz = _session.Data.ActiveBiz;
                 var found = GameSearchService.FindGame(game, biz.Server, allowDifferentServer: true);
                 if (found != null)
                 {
                     var gameBiz = $"{game.Id}_{found.Server}";
                     Logger.Info($"Auto-found game path: {found.Path} ({gameBiz})", "Main");
-                    App.Current.DataModel.ActiveGameBiz = gameBiz;
-                    App.Current.DataModel.SetGamePath(gameBiz, found.Path);
-                    App.Current.DataModel.SaveDataToFile();
+                    _session.Data.ActiveGameBiz = gameBiz;
+                    _session.Data.SetGamePath(gameBiz, found.Path);
+                    _session.Data.SaveDataToFile();
                 }
                 else
                 {

@@ -1,6 +1,7 @@
 ﻿using GenShin_Launcher_Plus.Core;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service;
+using GenShin_Launcher_Plus.Service.IService;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -16,8 +17,9 @@ namespace GenShin_Launcher_Plus
 
         public App()
         {
-            LoadProgramCore = new();
-            DataModel = new();
+            Session = new LauncherSession(new DataModel());
+            Services = AppServices.CreateDefault(Session);
+            LoadProgramCore = Services.GetRequiredService<LoadProgramCore>();
             InitializeComponent();
             ApplyAccentColor();
         }
@@ -65,17 +67,19 @@ namespace GenShin_Launcher_Plus
         public new static App Current => (App)Application.Current;
 
         public LoadProgramCore LoadProgramCore { get; set; }
-        public DataModel DataModel { get; set; }
-        public List<LanguageListModel> LangList { get; set; }
-        public NoticeOverAllBase NoticeOverAllBase { get; set; }
-        public LanguageModel Language { get; set; }
-        public UpdateModel? UpdateObject { get; set; }
-        public PkgUpdataModel? PkgUpdataModel { get; set; }
+        public ILauncherSession Session { get; }
+        public AppServices Services { get; }
+        public DataModel DataModel { get => Session.Data; set => Session.Data = value; }
+        public List<LanguageListModel> LangList { get => Session.Languages!; set => Session.Languages = value; }
+        public NoticeOverAllBase NoticeOverAllBase { get => Session.AccountOverlay!; set => Session.AccountOverlay = value; }
+        public LanguageModel Language { get => Session.Language!; set => Session.Language = value; }
+        public UpdateModel? UpdateObject { get => Session.Update; set => Session.Update = value; }
+        public PkgUpdataModel? PkgUpdataModel { get => Session.PackageUpdate; set => Session.PackageUpdate = value; }
         public BackgroundModel? BackgroundModel { get; set; }
-        public NoticeModel? NoticeObject { get; set; }
-        public MainWindow ThisMainWindow { get; set; }
+        public NoticeModel? NoticeObject { get => Session.Notice; set => Session.Notice = value; }
+        public MainWindow ThisMainWindow { get => Session.MainWindow!; set => Session.MainWindow = value; }
         public bool IsLoadUpdated { get; set; }
-        public bool IsLoadingBackground { get; set; }
+        public bool IsLoadingBackground { get => Session.IsLoadingBackground; set => Session.IsLoadingBackground = value; }
 
         private void ApplyAccentColor()
         {

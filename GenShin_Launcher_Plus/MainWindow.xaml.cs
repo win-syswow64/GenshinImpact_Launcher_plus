@@ -19,14 +19,13 @@ namespace GenShin_Launcher_Plus
     public partial class MainWindow : Window
     {
         public MainWindowViewModel ViewModel { get; }
-        private bool _sidebarExpanded;
         private bool _navigatingBack;
 
         public MainWindow()
         {
             InitializeComponent();
             App.Current.ThisMainWindow = this;
-            ViewModel = new MainWindowViewModel(this);
+            ViewModel = App.Current.Services.CreateMainWindowViewModel(this);
             DataContext = ViewModel;
 
             double cfgW = App.Current.DataModel.MainWidth;
@@ -60,15 +59,6 @@ namespace GenShin_Launcher_Plus
             return false;
         }
 
-        private void ContentArea_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            if (_sidebarExpanded && ViewModel.CurrentPage == null)
-            {
-                ToggleSidebar(sender, e);
-                e.Handled = true;
-            }
-        }
-
         public void NavigateBack()
         {
             if (ViewModel.CurrentPage == null || _navigatingBack) return;
@@ -86,7 +76,7 @@ namespace GenShin_Launcher_Plus
                 PageContent.Opacity = 1;
                 PageContent.RenderTransform = null;
                 PageOverlay.Opacity = 1;
-                ViewModel.NavigateTo(null);
+                ViewModel.NavigateHome();
                 ViewModel.RefreshNavVisibility();
                 _navigatingBack = false;
             };
@@ -546,29 +536,5 @@ namespace GenShin_Launcher_Plus
             BackgroundImage.Opacity = 1;
         }
 
-        // ==================== Sidebar ====================
-
-        private void ToggleSidebar(object sender, RoutedEventArgs e)
-        {
-            _sidebarExpanded = !_sidebarExpanded;
-            double from = _sidebarExpanded ? 48 : 220;
-            double to = _sidebarExpanded ? 220 : 48;
-            var anim = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(200))
-            {
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut }
-            };
-            if (_sidebarExpanded)
-            {
-                CollapsedPanel.Visibility = Visibility.Collapsed;
-                ExpandedPanel.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                ExpandedPanel.Visibility = Visibility.Collapsed;
-                CollapsedPanel.Visibility = Visibility.Visible;
-                NavigateBack();
-            }
-            Sidebar.BeginAnimation(FrameworkElement.WidthProperty, anim);
-        }
     }
 }

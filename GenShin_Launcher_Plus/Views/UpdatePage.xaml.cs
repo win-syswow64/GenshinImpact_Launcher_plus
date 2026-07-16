@@ -9,7 +9,7 @@ namespace GenShin_Launcher_Plus.Views
         public UpdatePage()
         {
             InitializeComponent();
-            DataContext = new UpdatePageViewModel();
+            DataContext = App.Current.Services.CreateUpdatePageViewModel();
         }
 
         private void SkipButton_Click(object sender, RoutedEventArgs e)

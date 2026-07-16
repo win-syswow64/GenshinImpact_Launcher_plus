@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GenShin_Launcher_Plus.Core;
 using GenShin_Launcher_Plus.Helper;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Service;
@@ -22,21 +23,45 @@ namespace GenShin_Launcher_Plus.ViewModels
     {
         private readonly MainWindow _main;
         private readonly ILaunchService _launchService;
+        private readonly ILauncherSession _session;
+        private readonly Func<MainWindow, MainWindowViewModel, IMainWindowService> _mainServiceFactory;
+        private readonly ILauncherNavigationService _navigationService;
 
-        public MainWindowViewModel(MainWindow main)
+        public MainWindowViewModel(
+            MainWindow main,
+            IUpdateService updateService,
+            ILaunchService launchService,
+            LoadProgramCore loadProgramCore,
+            ILauncherSession session,
+            GameInstallService installService,
+            Func<MainWindow, MainWindowViewModel, IMainWindowService> mainServiceFactory,
+            ILauncherNavigationService navigationService)
         {
             _main = main;
-            App.Current.LoadProgramCore.LoadLanguageCore();
-            new UpdateService().CheckUpdate(main);
-            MainService = new MainService(main, this);
+            _session = session;
+            _mainServiceFactory = mainServiceFactory;
+            _navigationService = navigationService;
+            _navigationService.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(ILauncherNavigationService.CurrentPage))
+                {
+                    OnPropertyChanged(nameof(CurrentPage));
+                    OnPropertyChanged(nameof(OverlayVisible));
+                    OnPropertyChanged(nameof(CanRunGame));
+                }
+            };
+            loadProgramCore.LoadLanguageCore();
+            updateService.CheckUpdate(main);
+            MainService = _mainServiceFactory(main, this);
 
             ExitProgramCommand = new RelayCommand(ExitProgram);
             MainMinimizedCommand = new RelayCommand(MainMinimized);
             OpenAboutCommand = new RelayCommand(OpenAbout);
             OpenQQGroupUrlCommand = new RelayCommand(() => FileHelper.OpenUrl("https://qm.qq.com/q/UZWuLb38om"));
             OpenImagesDirectoryCommand = new RelayCommand(OpenImagesDirectory);
-            _launchService = new LaunchService();
-            InstallService = new GameInstallService();
+            _launchService = launchService;
+            _launchService.ReadUserList();
+            InstallService = installService;
 
             // Propagate install service property changes to our derived properties
             InstallService.PropertyChanged += (_, e) =>
@@ -64,11 +89,11 @@ namespace GenShin_Launcher_Plus.ViewModels
                 }
             };
 
-            NavigateHomeCommand = new RelayCommand(() => NavigateTo(new HomePage()));
-            NavigateSettingsCommand = new RelayCommand(() => NavigateTo(new SettingPage()));
-            NavigateUsersCommand = new RelayCommand(() => NavigateTo(new UsersPage()));
-            NavigateProgramSettingsCommand = new RelayCommand(() => NavigateTo(new SettingPage(3)));
-            OpenGameSettingsCommand = new RelayCommand(() => NavigateTo(new SettingPage(0)));
+            NavigateHomeCommand = new RelayCommand(NavigateHome);
+            NavigateSettingsCommand = new RelayCommand(_navigationService.NavigateGameSettings);
+            NavigateUsersCommand = new RelayCommand(_navigationService.NavigateUsers);
+            NavigateProgramSettingsCommand = new RelayCommand(_navigationService.NavigateProgramSettings);
+            OpenGameSettingsCommand = new RelayCommand(_navigationService.NavigateGameSettings);
             RunGameCommand = new AsyncRelayCommand(RunGameOrInstallAsync);
             SelectGameCommand = new RelayCommand<string>(SelectGame);
             InstallGameCommand = new AsyncRelayCommand(InstallGameAsync);
@@ -88,14 +113,15 @@ namespace GenShin_Launcher_Plus.ViewModels
             };
 
             Title = languages.MainTitle?.Trim() ?? "Genshin Launcher Plus";
-            App.Current.DataModel.EXEname(Path.GetFileName(Environment.ProcessPath));
+            _session.Data.EXEname(Path.GetFileName(Environment.ProcessPath));
+            NavigateHome();
 
             _ = SetNoticeAsync();
             _ = RefreshGameStateAsync();
         }
 
         public IMainWindowService MainService { get; }
-        public LanguageModel languages => App.Current.Language;
+        public LanguageModel languages => _session.Language!;
 
         // === Game Install Service (exposed for XAML binding) ===
         public GameInstallService InstallService { get; }
@@ -149,7 +175,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             CurrentGameState?.State == GameState.PreDownloadAvailable && !InstallService.IsInstalling;
 
         public string CurrentGameDisplayName =>
-            App.Current.DataModel.ActiveGame?.DisplayName ?? "HoYoPlay";
+            _session.Data.ActiveGame?.DisplayName ?? "HoYoPlay";
 
         public string VersionStatusText
         {
@@ -204,7 +230,7 @@ namespace GenShin_Launcher_Plus.ViewModels
 
         private async Task InstallGameAsync()
         {
-            var gameBiz = App.Current.DataModel.ActiveGameBiz;
+            var gameBiz = _session.Data.ActiveGameBiz;
             var dialog = new System.Windows.Forms.FolderBrowserDialog
             {
                 Description = languages.SelectInstallPathText ?? "选择安装路径",
@@ -212,8 +238,8 @@ namespace GenShin_Launcher_Plus.ViewModels
             };
 
             // Find drives with existing game installations for hard link support
-            var existingDrives = GameInstallService.GetExistingGameDrives();
-            var defaultDir = GameInstallService.GetDefaultInstallDir(gameBiz);
+            var existingDrives = GameInstallService.GetExistingGameDrives(_session.Data);
+            var defaultDir = GameInstallService.GetDefaultInstallDir(_session.Data, gameBiz);
             dialog.SelectedPath = defaultDir;
 
             // Show hint about hard link requirement
@@ -250,7 +276,7 @@ namespace GenShin_Launcher_Plus.ViewModels
                 }
                 catch { }
 
-                App.Current.DataModel.SetGamePath(gameBiz, installPath);
+                _session.Data.SetGamePath(gameBiz, installPath);
                 OnPropertyChanged(nameof(GamePathDisplay));
                 await InstallService.InstallGameAsync(gameBiz, installPath);
                 await RefreshGameStateAsync();
@@ -259,8 +285,8 @@ namespace GenShin_Launcher_Plus.ViewModels
 
         private async Task UpdateGameAsync()
         {
-            var gameBiz = App.Current.DataModel.ActiveGameBiz;
-            var installPath = App.Current.DataModel.GamePath;
+            var gameBiz = _session.Data.ActiveGameBiz;
+            var installPath = _session.Data.GamePath;
             if (string.IsNullOrEmpty(installPath)) return;
             await InstallService.UpdateGameAsync(gameBiz, installPath);
             await RefreshGameStateAsync();
@@ -268,8 +294,8 @@ namespace GenShin_Launcher_Plus.ViewModels
 
         private async Task PreDownloadAsync()
         {
-            var gameBiz = App.Current.DataModel.ActiveGameBiz;
-            var installPath = App.Current.DataModel.GamePath;
+            var gameBiz = _session.Data.ActiveGameBiz;
+            var installPath = _session.Data.GamePath;
             if (string.IsNullOrEmpty(installPath)) return;
             await InstallService.PreDownloadAsync(gameBiz, installPath);
             await RefreshGameStateAsync();
@@ -290,9 +316,9 @@ namespace GenShin_Launcher_Plus.ViewModels
             var token = _gameStateCts.Token;
             try
             {
-                var gameBiz = App.Current.DataModel.ActiveGameBiz;
+                var gameBiz = _session.Data.ActiveGameBiz;
                 var state = await Task.Run(
-                    async () => await GameStateService.DetectGameStateAsync(gameBiz, token).ConfigureAwait(false),
+                    async () => await GameStateService.DetectGameStateAsync(_session.Data, gameBiz, token).ConfigureAwait(false),
                     token);
                 token.ThrowIfCancellationRequested();
                 CurrentGameState = state;
@@ -307,8 +333,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         public string ProgramVersionText => $"v{Application.ResourceAssembly.GetName().Version}";
         private ImageBrush _background = new();
         public ImageBrush Background { get => _background; set => SetProperty(ref _background, value); }
-        private object? _currentPage;
-        public object? CurrentPage { get => _currentPage; set => SetProperty(ref _currentPage, value); }
+        public object? CurrentPage => _navigationService.CurrentPage;
         private string _switchUser = string.Empty;
         public string SwitchUser { get => _switchUser; set => SetProperty(ref _switchUser, value); }
         private string _switchPort = string.Empty;
@@ -329,9 +354,22 @@ namespace GenShin_Launcher_Plus.ViewModels
         public ICommand RunGameCommand { get; }
         public ICommand SelectGameCommand { get; }
 
-        public Visibility NavScreenshotsVisible => App.Current.DataModel.NavScreenshots ? Visibility.Visible : Visibility.Collapsed;
-        public Visibility NavQQGroupVisible => App.Current.DataModel.NavQQGroup ? Visibility.Visible : Visibility.Collapsed;
-        public Visibility NavAboutVisible => App.Current.DataModel.NavAbout ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility NavScreenshotsVisible => _session.Data.NavScreenshots ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility NavQQGroupVisible => _session.Data.NavQQGroup ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility NavAboutVisible => _session.Data.NavAbout ? Visibility.Visible : Visibility.Collapsed;
+
+        public string ActiveAccountDisplay
+        {
+            get
+            {
+                var account = _session.Data.SwitchUser;
+                return string.IsNullOrWhiteSpace(account)
+                    ? (languages.AccountLabel ?? "未选择账号")
+                    : UserDataService.GetAccountDisplayName(account);
+            }
+        }
+
+        public string NoticeText => _session.Notice?.NoticeMsg ?? "探索提瓦特的最新资讯与活动。";
 
         public List<GameProfile> GameList => GameProfiles.All;
 
@@ -339,7 +377,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         {
             get
             {
-                var current = App.Current.DataModel.ActiveBiz.Game;
+                var current = _session.Data.ActiveBiz.Game;
                 for (int i = 0; i < GameProfiles.All.Count; i++)
                     if (GameProfiles.All[i].Id == current) return i;
                 for (int i = 0; i < GameProfiles.All.Count; i++)
@@ -350,13 +388,13 @@ namespace GenShin_Launcher_Plus.ViewModels
             {
                 if (value < 0 || value >= GameProfiles.All.Count) return;
                 var newGame = GameProfiles.All[value];
-                var currentBiz = App.Current.DataModel.ActiveBiz;
+                var currentBiz = _session.Data.ActiveBiz;
                 if (newGame.Id == currentBiz.Game) return;
                 string newBizStr = $"{newGame.Id}_{currentBiz.Server}";
                 var newBiz = new GameBiz(newBizStr);
                 if (!newBiz.IsKnown()) newBizStr = $"{newGame.Id}_cn";
-                App.Current.DataModel.ActiveGameBiz = newBizStr;
-                App.Current.DataModel.SelectedGame = newGame.Id;
+                _session.Data.ActiveGameBiz = newBizStr;
+                _session.Data.SelectedGame = newGame.Id;
                 Logger.Info($"Game switched to: {newGame.DisplayName} ({newBizStr})", "App");
                 RefreshGameSelector();
             }
@@ -366,7 +404,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         {
             get
             {
-                var profile = App.Current.DataModel.ActiveGame;
+                var profile = _session.Data.ActiveGame;
                 var servers = new List<string> { "cn", "global" };
                 if (profile?.BilibiliSdkPath != null) servers.Add("bilibili");
                 return servers;
@@ -394,7 +432,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         {
             get
             {
-                var server = App.Current.DataModel.ActiveBiz.Server;
+                var server = _session.Data.ActiveBiz.Server;
                 var list = ServerList;
                 for (int i = 0; i < list.Count; i++)
                     if (list[i] == server) return i;
@@ -405,10 +443,10 @@ namespace GenShin_Launcher_Plus.ViewModels
                 var list = ServerList;
                 if (value < 0 || value >= list.Count) return;
                 var newServer = list[value];
-                var currentBiz = App.Current.DataModel.ActiveBiz;
+                var currentBiz = _session.Data.ActiveBiz;
                 if (newServer == currentBiz.Server) return;
                 string newBizStr = $"{currentBiz.Game}_{newServer}";
-                App.Current.DataModel.ActiveGameBiz = newBizStr;
+                _session.Data.ActiveGameBiz = newBizStr;
                 Logger.Info($"Server switched to: {newBizStr}", "App");
                 RefreshGameSelector(reloadBackground: false);
             }
@@ -418,7 +456,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         {
             get
             {
-                var biz = App.Current.DataModel.ActiveBiz;
+                var biz = _session.Data.ActiveBiz;
                 if (biz.IsChinaServer()) return languages.GameClientTypePStr;
                 if (biz.IsGlobalServer()) return languages.GameClientTypeMStr;
                 if (biz.IsBilibili()) return languages.GameClientTypeBStr;
@@ -426,7 +464,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             }
         }
 
-        public string GamePathDisplay => App.Current.DataModel.GamePath ?? string.Empty;
+        public string GamePathDisplay => _session.Data.GamePath ?? string.Empty;
 
         private void SelectGame(string? gameId)
         {
@@ -445,10 +483,11 @@ namespace GenShin_Launcher_Plus.ViewModels
             OnPropertyChanged(nameof(CanRunGame));
             OnPropertyChanged(nameof(CurrentServerDisplay));
             OnPropertyChanged(nameof(CurrentGameDisplayName));
+            OnPropertyChanged(nameof(ActiveAccountDisplay));
             OnPropertyChanged(nameof(VersionStatusText));
             OnPropertyChanged(nameof(InstallStatusTitle));
             SwitchPort = $"{languages.GameClientStr} : {CurrentServerDisplay}";
-            App.Current.NoticeOverAllBase.SwitchPort = SwitchPort;
+            _session.AccountOverlay!.SwitchPort = SwitchPort;
             if (CurrentPage is SettingPage settingPage)
                 settingPage.RefreshForActiveGame();
             if (reloadBackground)
@@ -465,7 +504,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             try
             {
                 await Task.Delay(200, token);
-                await Service.MainService.LoadGameBackgroundAsync();
+                await MainService.LoadGameBackgroundAsync();
             }
             catch (TaskCanceledException) { }
             catch (Exception ex) { Logger.Warn("Background reload failed: " + ex.Message, "Background"); }
@@ -483,26 +522,19 @@ namespace GenShin_Launcher_Plus.ViewModels
             get
             {
                 if (CurrentGameState?.State == GameState.NotInstalled) return false;
-                var path = App.Current.DataModel.GamePath;
+                var path = _session.Data.GamePath;
                 if (string.IsNullOrEmpty(path)) return false;
-                var biz = App.Current.DataModel.ActiveBiz;
-                var game = App.Current.DataModel.ActiveGame;
+                var biz = _session.Data.ActiveBiz;
+                var game = _session.Data.ActiveGame;
                 if (game == null) return false;
                 string exe = game.GetExeName(biz);
                 return File.Exists(Path.Combine(path, exe));
             }
         }
 
-        public Visibility LaunchPanelVisible => CurrentPage == null ? Visibility.Visible : Visibility.Collapsed;
-        public Visibility OverlayVisible => CurrentPage != null ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility OverlayVisible => CurrentPage is HomePage ? Visibility.Collapsed : Visibility.Visible;
 
-        public void NavigateTo(object? page)
-        {
-            CurrentPage = page;
-            OnPropertyChanged(nameof(LaunchPanelVisible));
-            OnPropertyChanged(nameof(OverlayVisible));
-            OnPropertyChanged(nameof(CanRunGame));
-        }
+        public void NavigateHome() => _navigationService.NavigateHome();
 
         private void ExitProgram()
         {
@@ -510,7 +542,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             if (result) Environment.Exit(0);
         }
         private void MainMinimized() => _main.WindowState = WindowState.Minimized;
-        private void OpenImagesDirectory() => NavigateTo(new ScreenshotsPage());
+        private void OpenImagesDirectory() => _navigationService.NavigateScreenshots();
         private void OpenAbout()
         {
             var result = DialogHelper.ShowYesNo(languages.AboutStr + "\n\nOpen GitHub?", languages.AboutTitle);
@@ -519,8 +551,9 @@ namespace GenShin_Launcher_Plus.ViewModels
         private async Task SetNoticeAsync()
         {
             await MainService.CheckNotice();
-            if (App.Current.NoticeObject?.Code == 200)
-                DialogHelper.ShowInfo(App.Current.NoticeObject.NoticeMsg, languages.TipsStr);
+            OnPropertyChanged(nameof(NoticeText));
+            if (_session.Notice?.Code == 200)
+                DialogHelper.ShowInfo(_session.Notice.NoticeMsg, languages.TipsStr);
         }
     }
 }

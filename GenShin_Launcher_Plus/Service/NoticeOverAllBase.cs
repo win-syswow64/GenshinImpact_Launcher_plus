@@ -3,11 +3,22 @@ using System.Linq;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using GenShin_Launcher_Plus.Models;
+using GenShin_Launcher_Plus.Core;
+using GenShin_Launcher_Plus.Service.IService;
 
 namespace GenShin_Launcher_Plus.Service
 {
     public class NoticeOverAllBase : ObservableObject
     {
+        private readonly IRegistryService _registryService;
+        private readonly ILauncherSession _session;
+
+        public NoticeOverAllBase(ILauncherSession session, IRegistryService registryService)
+        {
+            _session = session;
+            _registryService = registryService;
+        }
+
         private string _switchUser = string.Empty;
         public string SwitchUser
         {
@@ -20,11 +31,11 @@ namespace GenShin_Launcher_Plus.Service
         {
             get
             {
-                var biz = App.Current.DataModel.ActiveBiz;
-                string gameClientType = biz.IsBilibili() ? App.Current.Language.GameClientTypeBStr
-                    : biz.IsGlobalServer() ? App.Current.Language.GameClientTypeMStr
-                    : App.Current.Language.GameClientTypePStr;
-                return $"{App.Current.Language.GameClientStr} : {gameClientType}";
+                var biz = _session.Data.ActiveBiz;
+                string gameClientType = biz.IsBilibili() ? _session.Language!.GameClientTypeBStr
+                    : biz.IsGlobalServer() ? _session.Language!.GameClientTypeMStr
+                    : _session.Language!.GameClientTypePStr;
+                return $"{_session.Language!.GameClientStr} : {gameClientType}";
             }
             set => SetProperty(ref _switchPort, value);
         }
@@ -34,12 +45,12 @@ namespace GenShin_Launcher_Plus.Service
         {
             get
             {
-                var biz = App.Current.DataModel.ActiveBiz;
+                var biz = _session.Data.ActiveBiz;
                 int index = biz.IsBilibili() ? 1 : biz.IsGlobalServer() ? 2 : 0;
-                string gameClientType = biz.IsBilibili() ? App.Current.Language.GameClientTypeBStr
-                    : biz.IsGlobalServer() ? App.Current.Language.GameClientTypeMStr
-                    : App.Current.Language.GameClientTypePStr;
-                SwitchPort = $"{App.Current.Language.GameClientStr} : {gameClientType}";
+                string gameClientType = biz.IsBilibili() ? _session.Language!.GameClientTypeBStr
+                    : biz.IsGlobalServer() ? _session.Language!.GameClientTypeMStr
+                    : _session.Language!.GameClientTypePStr;
+                SwitchPort = $"{_session.Language!.GameClientStr} : {gameClientType}";
                 return index;
             }
             set => SetProperty(ref _gamePortListIndex, value);
@@ -55,12 +66,12 @@ namespace GenShin_Launcher_Plus.Service
                 if (!string.IsNullOrEmpty(SwitchUserValue))
                 {
                     var account = UserLists.FirstOrDefault(x => x.UserName == SwitchUserValue);
-                    if (account == null || !string.Equals(account.GameBiz, App.Current.DataModel.ActiveGameBiz, System.StringComparison.OrdinalIgnoreCase))
+                    if (account == null || !string.Equals(account.GameBiz, _session.Data.ActiveGameBiz, System.StringComparison.OrdinalIgnoreCase))
                         return;
-                    SwitchUser = $"{App.Current.Language.UserNameLab} : {account.DisplayName}";
-                    App.Current.DataModel.SwitchUser = SwitchUserValue;
-                    App.Current.DataModel.SaveDataToFile();
-                    new RegistryService().SetToRegistry(SwitchUserValue);
+                    SwitchUser = $"{_session.Language!.UserNameLab} : {account.DisplayName}";
+                    _session.Data.SwitchUser = SwitchUserValue;
+                    _session.Data.SaveDataToFile();
+                    _registryService.SetToRegistry(SwitchUserValue);
                 }
             }
         }
@@ -77,7 +88,7 @@ namespace GenShin_Launcher_Plus.Service
         {
             get
             {
-                _isGamePortLists = App.Current.DataModel.ActiveBiz.IsGlobalServer()
+                _isGamePortLists = _session.Data.ActiveBiz.IsGlobalServer()
                     ? Visibility.Collapsed
                     : Visibility.Visible;
                 return _isGamePortLists;

@@ -3,11 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:ctrl="clr-namespace:GenShin_Launcher_Plus.Controls"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         mc:Ignorable="d"
         d:Height="730" d:Width="1280"
-        MinWidth="760" MinHeight="520"
+        MinWidth="980" MinHeight="620"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         ResizeMode="CanResize"
@@ -20,371 +19,129 @@
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType">
     <shell:WindowChrome.WindowChrome>
-        <shell:WindowChrome CaptionHeight="0"
-                            ResizeBorderThickness="6"
-                            GlassFrameThickness="0"
-                            CornerRadius="0"
-                            UseAeroCaptionButtons="False"/>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
-    <Border x:Name="RootChrome"
-            Background="{StaticResource AppBackgroundBrush}"
-            BorderBrush="{StaticResource WindowStrokeBrush}"
-            BorderThickness="0"
-            ClipToBounds="True">
-        <Grid x:Name="MainGrid">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="56"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="SidebarCol" Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
 
-            <Image x:Name="BackgroundImage"
-                   Grid.RowSpan="2" Grid.ColumnSpan="2"
-                   Source="/Images/MainBackground.jpg"
-                   Stretch="UniformToFill"
-                   RenderOptions.BitmapScalingMode="LowQuality"/>
-            <MediaElement x:Name="BackgroundVideo"
-                          Grid.RowSpan="2" Grid.ColumnSpan="2"
-                          Stretch="UniformToFill"
-                          LoadedBehavior="Manual"
-                          UnloadedBehavior="Stop"
-                          IsMuted="True"
-                          Opacity="0"
-                          MediaOpened="MediaElement_Opened"
-                          MediaFailed="MediaElement_Failed"
-                          MediaEnded="MediaElement_Ended"/>
-            <Image x:Name="VideoFrameImage" Grid.RowSpan="2" Grid.ColumnSpan="2" Stretch="UniformToFill" Opacity="0"/>
-            <Image x:Name="VideoOverlayImage" Grid.RowSpan="2" Grid.ColumnSpan="2" Stretch="UniformToFill" Opacity="0"/>
-            <Border Grid.RowSpan="2" Grid.ColumnSpan="2" Background="{StaticResource BackgroundScrimBrush}"/>
-            <Rectangle Grid.RowSpan="2" Grid.ColumnSpan="2" IsHitTestVisible="False">
+    <Border x:Name="RootChrome" Background="{StaticResource AppBackgroundBrush}" BorderBrush="{StaticResource WindowStrokeBrush}" BorderThickness="1" ClipToBounds="True">
+        <Grid x:Name="MainGrid">
+            <!-- Immersive game background, managed by MainWindow.xaml.cs. -->
+            <Image x:Name="BackgroundImage" Source="/Images/MainBackground.jpg" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"/>
+            <MediaElement x:Name="BackgroundVideo" Stretch="UniformToFill" LoadedBehavior="Manual" UnloadedBehavior="Stop" IsMuted="True" Opacity="0"
+                          MediaOpened="MediaElement_Opened" MediaFailed="MediaElement_Failed" MediaEnded="MediaElement_Ended"/>
+            <Image x:Name="VideoFrameImage" Stretch="UniformToFill" Opacity="0"/>
+            <Image x:Name="VideoOverlayImage" Stretch="UniformToFill" Opacity="0"/>
+            <Rectangle IsHitTestVisible="False">
                 <Rectangle.Fill>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                        <GradientStop Color="#66111216" Offset="0"/>
-                        <GradientStop Color="#15111216" Offset="0.42"/>
-                        <GradientStop Color="#CC111216" Offset="1"/>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#E8101722" Offset="0"/>
+                        <GradientStop Color="#B3101722" Offset="0.32"/>
+                        <GradientStop Color="#280C111A" Offset="0.68"/>
+                        <GradientStop Color="#780A0F17" Offset="1"/>
                     </LinearGradientBrush>
                 </Rectangle.Fill>
             </Rectangle>
 
-            <Border x:Name="TopBar"
-                    Grid.Row="0"
-                    Grid.ColumnSpan="2"
-                    Background="{StaticResource TopBarBrush}"
-                    BorderBrush="{StaticResource PanelStrokeBrush}"
-                    BorderThickness="0,0,0,1"
-                    MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
-                <Grid Margin="14,0,10,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="70"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,18,0">
-                        <Border Width="32" Height="32" CornerRadius="6" Background="#18FFFFFF" Margin="0,0,10,0">
-                            <Image Source="/ICON.ico"
-                                   Width="24"
-                                   Height="24"
-                                   Stretch="Uniform"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"/>
-                        </Border>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Title}"
-                                       Foreground="{StaticResource TextFillBrush}"
-                                       FontSize="13"
-                                       FontWeight="SemiBold"
-                                       TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Text="{Binding ProgramVersionText}"
-                                       Foreground="{StaticResource TextFillTertiaryBrush}"
-                                       FontSize="11"
-                                       TextTrimming="CharacterEllipsis"/>
+                <!-- Compact navigation, based on Starward's left-compact navigation mode. -->
+                <Border x:Name="Sidebar" Grid.Column="0" Background="#DC101721" BorderBrush="#22FFFFFF" BorderThickness="0,0,1,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="70"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="64"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="25" Foreground="White"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <StackPanel Grid.Row="1" Margin="8,4" VerticalAlignment="Top">
+                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Margin="0,0,0,9" Command="{Binding NavigateHomeCommand}" ToolTip="主页" Content="&#xE80F;" FontSize="20"/>
+                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Margin="0,0,0,9" Command="{Binding NavigateUsersCommand}" ToolTip="{Binding languages.AccountManageTab}" Content="&#xE77B;" FontSize="20"/>
+                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Margin="0,0,0,9" Command="{Binding OpenImagesDirectoryCommand}" ToolTip="{Binding languages.NavScreenshotsToolTip}" Visibility="{Binding NavScreenshotsVisible}" Content="&#xE8B9;" FontSize="20"/>
+                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Margin="0,0,0,9" Command="{Binding OpenQQGroupUrlCommand}" ToolTip="{Binding languages.NavQQGroupText}" Visibility="{Binding NavQQGroupVisible}" Content="&#xE8B8;" FontSize="20"/>
+                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Command="{Binding OpenAboutCommand}" ToolTip="{Binding languages.NavAboutText}" Visibility="{Binding NavAboutVisible}" Content="&#xE946;" FontSize="20"/>
                         </StackPanel>
-                    </StackPanel>
+                        <Button Grid.Row="2" Style="{StaticResource IconButton}" Width="54" Height="54" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Command="{Binding NavigateProgramSettingsCommand}" ToolTip="{Binding languages.NavSettingsText}" Content="&#xE713;" FontSize="20"/>
+                    </Grid>
+                </Border>
 
-                    <ListBox Grid.Column="1"
-                             ItemsSource="{Binding GameList}"
-                             SelectedIndex="{Binding SelectedGameIndex}"
-                             BorderThickness="0"
-                             Background="Transparent"
-                             Padding="0"
-                             VerticalAlignment="Center"
-                             HorizontalAlignment="Left"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal"/>
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                        <ListBox.ItemContainerStyle>
-                            <Style TargetType="ListBoxItem">
-                                <Setter Property="Padding" Value="0"/>
-                                <Setter Property="Margin" Value="0,0,8,0"/>
-                                <Setter Property="Background" Value="Transparent"/>
-                                <Setter Property="BorderThickness" Value="0"/>
-                                <Setter Property="Cursor" Value="Hand"/>
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="ListBoxItem">
-                                            <Border x:Name="Bd"
-                                                    Width="40" Height="40"
-                                                    Background="#12FFFFFF"
-                                                    BorderBrush="#1AFFFFFF"
-                                                    BorderThickness="1"
-                                                    CornerRadius="8">
-                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#22FFFFFF"/>
-                                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#3DFFFFFF"/>
-                                                </Trigger>
-                                                <Trigger Property="IsSelected" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#2AFFFFFF"/>
-                                                    <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Image Width="26" Height="26" Source="{Binding IconPath}" Stretch="Uniform">
-                                    <Image.Style>
-                                        <Style TargetType="Image">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsInstalled}" Value="False">
-                                                    <Setter Property="Opacity" Value="0.42"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Image.Style>
-                                </Image>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0">
-                        <TextBlock Text="{Binding languages.GameClientStr}"
-                                   Foreground="{StaticResource TextFillTertiaryBrush}"
-                                   FontSize="12"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0"/>
-                        <ComboBox ItemsSource="{Binding ServerDisplayNames}"
-                                  SelectedIndex="{Binding SelectedServerIndex}"
-                                  Style="{StaticResource DarkComboBox}"
-                                  MinWidth="112"
-                                  Height="32"
-                                  FontSize="12"/>
-                    </StackPanel>
-
-                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button Style="{StaticResource IconButton}"
-                                Width="36" Height="36"
-                                Command="{Binding MainMinimizedCommand}"
-                                ToolTip="{Binding languages.MinimizeToolTip}"
-                                Content="&#xE949;"/>
-                        <Button Style="{StaticResource IconButton}"
-                                Width="36" Height="36"
-                                Command="{Binding ExitProgramCommand}"
-                                ToolTip="{Binding languages.CloseToolTip}"
-                                Content="&#xE8BB;"/>
-                    </StackPanel>
-                </Grid>
-            </Border>
-
-            <Border x:Name="Sidebar"
-                    Grid.Row="1"
-                    Grid.Column="0"
-                    Width="56"
-                    Background="{StaticResource SidebarBrush}"
-                    BorderBrush="{StaticResource PanelStrokeBrush}"
-                    BorderThickness="0,0,1,0">
-                <Grid>
+                <Grid Grid.Column="1">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="76"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <Button x:Name="ToggleBtn"
-                            Grid.Row="0"
-                            Style="{StaticResource IconButton}"
-                            Width="40" Height="40"
-                            Margin="8,12,8,8"
-                            Foreground="{StaticResource TextFillSecondaryBrush}"
-                            Click="ToggleSidebar"
-                            Content="&#xE700;"/>
-
-                    <StackPanel x:Name="CollapsedPanel" Grid.Row="1" Margin="8,4">
-                        <Button Style="{StaticResource IconButton}" Width="40" Height="40" Command="{Binding OpenImagesDirectoryCommand}" ToolTip="{Binding languages.NavScreenshotsToolTip}" Visibility="{Binding NavScreenshotsVisible}" Content="&#xE8B9;"/>
-                        <Button Style="{StaticResource IconButton}" Width="40" Height="40" Command="{Binding OpenQQGroupUrlCommand}" ToolTip="{Binding languages.NavQQGroupText}" Visibility="{Binding NavQQGroupVisible}" Content="&#xE8B8;"/>
-                        <Button Style="{StaticResource IconButton}" Width="40" Height="40" Command="{Binding OpenAboutCommand}" ToolTip="{Binding languages.NavAboutText}" Visibility="{Binding NavAboutVisible}" Content="&#xE946;"/>
-                        <Button Style="{StaticResource IconButton}" Width="40" Height="40" Command="{Binding NavigateProgramSettingsCommand}" ToolTip="{Binding languages.NavSettingsText}" Content="&#xE713;"/>
-                    </StackPanel>
-
-                    <StackPanel x:Name="ExpandedPanel" Grid.Row="1" Margin="10,4,10,0" Visibility="Collapsed">
-                        <RadioButton Style="{StaticResource NavButton}" Command="{Binding OpenImagesDirectoryCommand}" Margin="0,0,0,4" Visibility="{Binding NavScreenshotsVisible}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE8B9;" FontFamily="{StaticResource IconFont}" FontSize="16" Width="28"/>
-                                <TextBlock Text="{Binding languages.NavScreenshotsText}" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </RadioButton>
-                        <RadioButton Style="{StaticResource NavButton}" Command="{Binding OpenQQGroupUrlCommand}" Margin="0,0,0,4" Visibility="{Binding NavQQGroupVisible}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE8B8;" FontFamily="{StaticResource IconFont}" FontSize="16" Width="28"/>
-                                <TextBlock Text="{Binding languages.NavQQGroupText}" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </RadioButton>
-                        <RadioButton Style="{StaticResource NavButton}" Command="{Binding OpenAboutCommand}" Margin="0,0,0,4" Visibility="{Binding NavAboutVisible}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE946;" FontFamily="{StaticResource IconFont}" FontSize="16" Width="28"/>
-                                <TextBlock Text="{Binding languages.NavAboutText}" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </RadioButton>
-                        <RadioButton Style="{StaticResource NavButton}" Command="{Binding NavigateProgramSettingsCommand}" Margin="0,0,0,4">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE713;" FontFamily="{StaticResource IconFont}" FontSize="16" Width="28"/>
-                                <TextBlock Text="{Binding languages.NavSettingsText}" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </RadioButton>
-                    </StackPanel>
-                </Grid>
-            </Border>
-
-            <Border x:Name="ContentArea"
-                    Grid.Row="1"
-                    Grid.Column="1"
-                    Background="Transparent"
-                    MouseLeftButtonDown="ContentArea_MouseLeftButtonDown">
-                <Grid>
-                    <Grid Visibility="{Binding LaunchPanelVisible}" Margin="32,28,390,34">
-                        <StackPanel VerticalAlignment="Bottom" MaxWidth="640">
-                            <TextBlock Text="{Binding CurrentGameDisplayName}"
-                                       Foreground="{StaticResource TextFillBrush}"
-                                       FontSize="34"
-                                       FontWeight="SemiBold"
-                                       TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Text="{Binding VersionStatusText}"
-                                       Foreground="{StaticResource MutedWhiteBrush}"
-                                       FontSize="14"
-                                       Margin="0,6,0,14"
-                                       TextTrimming="CharacterEllipsis"/>
-                        </StackPanel>
-                    </Grid>
-
-                    <Border x:Name="PageOverlay"
-                            Background="{StaticResource PageOverlayBrush}"
-                            Visibility="{Binding OverlayVisible}"/>
-                    <ContentControl x:Name="PageContent"
-                                    Content="{Binding CurrentPage}"
-                                    Margin="0"/>
-
-                    <Border x:Name="LaunchPanel"
-                            Visibility="{Binding LaunchPanelVisible}"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Bottom"
-                            Width="340"
-                            Margin="0,0,32,32"
-                            Background="{StaticResource GlassPanelBrush}"
-                            BorderBrush="{StaticResource PanelStrokeBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Padding="18">
-                        <StackPanel>
-                            <Grid Margin="0,0,0,14">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="{Binding InstallStatusTitle}"
-                                               Foreground="{StaticResource TextFillBrush}"
-                                               FontSize="15"
-                                               FontWeight="SemiBold"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Text="{Binding InstallService.StatusText}"
-                                               Foreground="{StaticResource TextFillTertiaryBrush}"
-                                               FontSize="12"
-                                               Margin="0,4,0,0"
-                                               Visibility="{Binding ShowProgressPanel, Converter={StaticResource BoolToVis}}"
-                                               TextTrimming="CharacterEllipsis"/>
+                    <!-- Game selector and window controls. -->
+                    <Border Grid.Row="0" Background="#160B111A" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                        <Grid Margin="18,10,18,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,20,0">
+                                <Border Width="42" Height="42" Background="#30FFFFFF" CornerRadius="10">
+                                    <Image Source="/ICON.ico" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding CurrentGameDisplayName}" Foreground="White" FontSize="17" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding ProgramVersionText}" Foreground="#9DFFFFFF" FontSize="11" Margin="0,2,0,0"/>
                                 </StackPanel>
-                                <TextBlock Grid.Column="1"
-                                           Text="{Binding InstallService.ProgressText}"
-                                           Foreground="{DynamicResource AccentBrush}"
-                                           FontSize="18"
-                                           FontWeight="SemiBold"
-                                           VerticalAlignment="Top"
-                                           Visibility="{Binding ShowProgressPanel, Converter={StaticResource BoolToVis}}"/>
-                            </Grid>
-
-                            <StackPanel Visibility="{Binding ShowProgressPanel, Converter={StaticResource BoolToVis}}" Margin="0,0,0,14">
-                                <ProgressBar Style="{StaticResource AccentProgressBar}"
-                                             Value="{Binding InstallService.ProgressPercent}"
-                                             Maximum="100"
-                                             Height="5"/>
-                                <Grid Margin="0,8,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding InstallService.DownloadSpeedText}"
-                                               Foreground="{StaticResource TextFillSecondaryBrush}"
-                                               FontSize="12"/>
-                                    <TextBlock Grid.Column="1"
-                                               Text="{Binding InstallService.BytesProgressText}"
-                                               Foreground="{StaticResource TextFillTertiaryBrush}"
-                                               FontSize="12"/>
-                                </Grid>
-                                <Button Content="{Binding languages.PauseBtn}"
-                                        Style="{StaticResource SecondaryButton}"
-                                        Command="{Binding CancelInstallCommand}"
-                                        Height="32"
-                                        Margin="0,12,0,0"/>
                             </StackPanel>
-
-                            <Button Content="{Binding languages.PreDownloadBtn}"
-                                    Style="{StaticResource SecondaryButton}"
-                                    Command="{Binding PreDownloadCommand}"
-                                    Height="36"
-                                    Margin="0,0,0,10"
-                                    Visibility="{Binding ShowPreDownloadButton, Converter={StaticResource BoolToVis}}"/>
-
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="60"/>
-                                </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0"
-                                        Content="{Binding ActionButtonText}"
-                                        Style="{StaticResource PrimaryButton}"
-                                        Command="{Binding RunGameCommand}"
-                                        IsEnabled="{Binding ActionButtonEnabled}"
-                                        Height="52"
-                                        FontSize="17"
-                                        FontWeight="SemiBold"/>
-                                <Button Grid.Column="1"
-                                        Style="{StaticResource SecondaryButton}"
-                                        Height="52"
-                                        Padding="0"
-                                        Margin="8,0,0,0"
-                                        FontSize="20"
-                                        FontFamily="{StaticResource IconFont}"
-                                        Command="{Binding OpenGameSettingsCommand}"
-                                        ToolTip="{Binding languages.GameSettingsBtn}"
-                                        Content="&#xE713;"/>
-                            </Grid>
-                        </StackPanel>
+                            <ListBox Grid.Column="1" ItemsSource="{Binding GameList}" SelectedIndex="{Binding SelectedGameIndex}" Background="Transparent" BorderThickness="0"
+                                     HorizontalAlignment="Left" VerticalAlignment="Center" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,9,0"/><Setter Property="Background" Value="Transparent"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="GameTab" Width="48" Height="48" Background="#1AFFFFFF" BorderBrush="#22FFFFFF" BorderThickness="1" CornerRadius="10">
+                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="GameTab" Property="Background" Value="#31FFFFFF"/></Trigger>
+                                                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="GameTab" Property="Background" Value="#42FFFFFF"/><Setter TargetName="GameTab" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Image Width="36" Height="36" Source="{Binding IconPath}" Stretch="Uniform">
+                                            <Image.Style>
+                                                <Style TargetType="Image">
+                                                    <Setter Property="Opacity" Value="1"/>
+                                                    <Style.Triggers><DataTrigger Binding="{Binding IsInstalled}" Value="False"><Setter Property="Opacity" Value="0.42"/></DataTrigger></Style.Triggers>
+                                                </Style>
+                                            </Image.Style>
+                                        </Image>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ComboBox ItemsSource="{Binding ServerDisplayNames}" SelectedIndex="{Binding SelectedServerIndex}" Style="{StaticResource DarkComboBox}" MinWidth="104" Height="32" FontSize="12" Margin="0,0,12,0"/>
+                                <Button Style="{StaticResource IconButton}" Width="34" Height="34" Command="{Binding MainMinimizedCommand}" ToolTip="{Binding languages.MinimizeToolTip}" Content="&#xE949;"/>
+                                <Button Style="{StaticResource IconButton}" Width="34" Height="34" Command="{Binding ExitProgramCommand}" ToolTip="{Binding languages.CloseToolTip}" Content="&#xE8BB;"/>
+                            </StackPanel>
+                        </Grid>
                     </Border>
+
+                    <Grid Grid.Row="1">
+                        <Border x:Name="PageOverlay" Background="#A60C121C" Visibility="{Binding OverlayVisible}"/>
+                        <ContentControl x:Name="PageContent" Content="{Binding CurrentPage}"/>
+                    </Grid>
                 </Grid>
-            </Border>
+            </Grid>
         </Grid>
     </Border>
 </Window>

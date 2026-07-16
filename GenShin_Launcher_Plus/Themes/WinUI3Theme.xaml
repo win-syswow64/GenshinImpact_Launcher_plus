@@ -2,9 +2,9 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- ===== Starward-inspired lightweight WinUI palette ===== -->
-    <Color x:Key="AccentColor">#70D6A3</Color>
-    <Color x:Key="AccentLightColor">#96E7BE</Color>
-    <Color x:Key="AccentDarkColor">#45A978</Color>
+    <Color x:Key="AccentColor">#9EA9CC</Color>
+    <Color x:Key="AccentLightColor">#C1C9E5</Color>
+    <Color x:Key="AccentDarkColor">#7883A8</Color>
 
     <!-- Background layers -->
     <Color x:Key="LayerFillColorDefault">#17181C</Color>

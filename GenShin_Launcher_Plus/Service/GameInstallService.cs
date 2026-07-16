@@ -14,6 +14,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using GenShin_Launcher_Plus.Helper;
+using GenShin_Launcher_Plus.Core;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Models.HoYoPlay;
 using ZstdSharp;
@@ -22,6 +23,7 @@ namespace GenShin_Launcher_Plus.Service;
 
 public class GameInstallService : INotifyPropertyChanged
 {
+    private readonly ILauncherSession _session;
     private static readonly HttpClient[] _httpClients;
     private static readonly int _maxParallelism;
     private const int MD5_BUFFER_SIZE = 1 << 19; // 512KB, matches Starward's MD5 check buffer
@@ -41,6 +43,11 @@ public class GameInstallService : INotifyPropertyChanged
                 ConnectTimeout = TimeSpan.FromSeconds(15),
             }) { Timeout = TimeSpan.FromMinutes(5) };
         }
+    }
+
+    public GameInstallService(ILauncherSession session)
+    {
+        _session = session;
     }
 
     // === Bindable ===
@@ -120,13 +127,13 @@ public class GameInstallService : INotifyPropertyChanged
 
     // === Helpers ===
 
-    public static List<string> GetExistingGameDrives()
+    public static List<string> GetExistingGameDrives(DataModel data)
     {
         var drives = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var profile in GameProfiles.All)
             foreach (var server in new[] { "cn", "global", "bilibili" })
             {
-                var p = App.Current.DataModel.GetGamePath($"{profile.Id}_{server}");
+                var p = data.GetGamePath($"{profile.Id}_{server}");
                 if (!string.IsNullOrEmpty(p) && Directory.Exists(p))
                 {
                     var r = Path.GetPathRoot(p);
@@ -136,11 +143,11 @@ public class GameInstallService : INotifyPropertyChanged
         return drives.ToList();
     }
 
-    public static string GetDefaultInstallDir(string gameBiz)
+    public static string GetDefaultInstallDir(DataModel data, string gameBiz)
     {
         var game = new GameBiz(gameBiz).Game;
         var folder = game switch { "genshin" => "Genshin Impact", "starrail" => "Star Rail", "zzz" => "ZenlessZoneZero", "honkai3" => "Honkai Impact 3rd", _ => "miHoYo Game" };
-        var drives = GetExistingGameDrives();
+        var drives = GetExistingGameDrives(data);
         if (drives.Count > 0) return Path.Combine(drives[0], "Program Files", "miHoYo Launcher", "games", folder);
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), folder);
     }
@@ -1346,7 +1353,7 @@ public class GameInstallService : INotifyPropertyChanged
             foreach (var s in new[] { "cn", "global", "bilibili" })
             {
                 var other = $"{game}_{s}"; if (other == gameBiz) continue;
-                var p = App.Current.DataModel.GetExactGamePath(other);
+                var p = _session.Data.GetExactGamePath(other);
                 if (string.IsNullOrEmpty(p) || !Directory.Exists(p))
                     p = GameSearchService.FindGame(profile, s)?.Path;
                 if (string.IsNullOrEmpty(p) || !Directory.Exists(p) || Path.GetPathRoot(p) != root) continue;
@@ -1485,7 +1492,7 @@ public class GameInstallService : INotifyPropertyChanged
             {
                 var otherBiz = $"{game}_{server}";
                 if (otherBiz == gameBiz) continue;
-                var otherPath = App.Current.DataModel.GetExactGamePath(otherBiz);
+                var otherPath = _session.Data.GetExactGamePath(otherBiz);
                 if (string.IsNullOrEmpty(otherPath) || !Directory.Exists(otherPath)) continue;
                 if (Path.GetPathRoot(otherPath) != root) continue;
 
@@ -1526,7 +1533,7 @@ public class GameInstallService : INotifyPropertyChanged
             {
                 var otherBiz = $"{game}_{server}";
                 if (otherBiz == gameBiz) continue;
-                var otherPath = App.Current.DataModel.GetExactGamePath(otherBiz);
+                var otherPath = _session.Data.GetExactGamePath(otherBiz);
                 if (string.IsNullOrEmpty(otherPath) || !Directory.Exists(otherPath)) continue;
                 if (Path.GetPathRoot(otherPath) != root) continue;
                 foreach (var file in toDownload)

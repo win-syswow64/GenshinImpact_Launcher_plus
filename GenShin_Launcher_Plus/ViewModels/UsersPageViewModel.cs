@@ -15,10 +15,10 @@ namespace GenShin_Launcher_Plus.ViewModels
         private readonly IRegistryService _registryService;
         private readonly IUserDataService _userDataService;
 
-        public UsersPageViewModel()
+        public UsersPageViewModel(IRegistryService registryService, IUserDataService userDataService)
         {
-            _registryService = new RegistryService();
-            _userDataService = new UserDataService();
+            _registryService = registryService;
+            _userDataService = userDataService;
             SaveUserDataCommand = new RelayCommand(SaveUserData);
             RemoveThisPageCommand = new RelayCommand(RemoveThisPage);
         }

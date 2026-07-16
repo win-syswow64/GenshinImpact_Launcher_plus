@@ -23,10 +23,26 @@ namespace GenShin_Launcher_Plus.ViewModels
         private IUserDataService? _userDataService;
         private IRegistryService? _registryService;
         private readonly ISettingService _settingService;
+        private readonly IUpdateService _updateService;
+        private readonly Func<GameInstallService> _gameInstallServiceFactory;
+        private readonly Func<MainWindow, MainWindowViewModel, IMainWindowService> _mainServiceFactory;
 
-        public SettingsPageViewModel(int mode = 0)
+        public SettingsPageViewModel(
+            int mode,
+            ISettingService settingService,
+            IUserDataService userDataService,
+            IRegistryService registryService,
+            IUpdateService updateService,
+            Func<GameInstallService> gameInstallServiceFactory,
+            Func<MainWindow, MainWindowViewModel, IMainWindowService> mainServiceFactory)
         {
-            _settingService = new SettingService(this);
+            _settingService = settingService;
+            _userDataService = userDataService;
+            _registryService = registryService;
+            _updateService = updateService;
+            _gameInstallServiceFactory = gameInstallServiceFactory;
+            _mainServiceFactory = mainServiceFactory;
+            _settingService.Initialize(this);
             _isGameMode = mode == 0;
             _flipViewSelectedIndex = mode == 0 ? 0 : 2;
             _navScreenshots = App.Current.DataModel.NavScreenshots;
@@ -129,8 +145,8 @@ namespace GenShin_Launcher_Plus.ViewModels
         }
 
         public ISettingService SettingService => _settingService;
-        public IUserDataService UserDataService => _userDataService ??= new UserDataService();
-        public IRegistryService RegistryService => _registryService ??= new RegistryService();
+        public IUserDataService UserDataService => _userDataService!;
+        public IRegistryService RegistryService => _registryService!;
         public LanguageModel languages => App.Current.Language;
 
         private string _settingTitleColor = "#FF272727";
@@ -551,7 +567,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         public ICommand InstallAudioPackCommand { get; }
 
         private GameInstallService? _audioInstallService;
-        public GameInstallService AudioInstallService => _audioInstallService ??= new GameInstallService();
+        public GameInstallService AudioInstallService => _audioInstallService ??= _gameInstallServiceFactory();
 
         public void RefreshAudioPacks()
         {
@@ -575,7 +591,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             AudioPackStatusText = $"正在下载 {audioField} 音频包...";
             try
             {
-                _audioInstallService = new GameInstallService();
+                _audioInstallService = _gameInstallServiceFactory();
                 OnPropertyChanged(nameof(AudioInstallService));
                 await _audioInstallService.DownloadAudioPackAsync(gameBiz, installPath, audioField);
                 if (_audioInstallService.State == GameInstallState.Finished)
@@ -634,7 +650,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         {
             App.Current.IsLoadUpdated = false;
             App.Current.DataModel.IsCloseUpdate = false;
-            new UpdateService().CheckUpdate(App.Current.ThisMainWindow);
+            _updateService.CheckUpdate(App.Current.ThisMainWindow);
         }
 
         private async void SaveBackground()
@@ -690,7 +706,7 @@ namespace GenShin_Launcher_Plus.ViewModels
                 if (UseXunkongWallpaper) UseXunkongWallpaper = !UseXunkongWallpaper;
                 return;
             }
-            _ = new MainService(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
+            _ = _mainServiceFactory(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
         }
 
         private void DeleteUser()

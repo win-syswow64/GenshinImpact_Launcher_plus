@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using GenShin_Launcher_Plus.Helper;
+using GenShin_Launcher_Plus.Core;
 using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Models.HoYoPlay;
 
@@ -53,7 +54,7 @@ public static class GameStateService
     /// <summary>
     /// Detect the current state of a game
     /// </summary>
-    public static async Task<GameStateInfo> DetectGameStateAsync(string gameBiz, CancellationToken ct = default)
+    public static async Task<GameStateInfo> DetectGameStateAsync(DataModel data, string gameBiz, CancellationToken ct = default)
     {
         var info = new GameStateInfo { GameBiz = gameBiz };
         var profile = GameProfiles.FindById(new GameBiz(gameBiz).Game);
@@ -63,7 +64,7 @@ public static class GameStateService
             return info;
         }
 
-        var installPath = App.Current.DataModel.GetGamePath(gameBiz);
+        var installPath = data.GetGamePath(gameBiz);
         info.InstallPath = installPath;
         info.IsInstalled = IsGameInstalled(installPath, profile, new GameBiz(gameBiz));
         info.LocalVersion = GetLocalVersion(installPath);

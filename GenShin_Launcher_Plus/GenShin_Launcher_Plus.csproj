@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net6.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
@@ -16,6 +16,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Authors>DawnFz &amp; Catboss</Authors>
     <Product>原神启动器Plus</Product>
+    <!-- Keep verification/build output inside this project from being globbed as source. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

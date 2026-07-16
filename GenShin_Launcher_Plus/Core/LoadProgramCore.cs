@@ -1,5 +1,6 @@
 ﻿using GenShin_Launcher_Plus.Models;
 using GenShin_Launcher_Plus.Services;
+using GenShin_Launcher_Plus.Service.IService;
 using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,21 +9,24 @@ namespace GenShin_Launcher_Plus.Core
 {
     public class LoadProgramCore
     {
-        public LoadProgramCore()
+        private readonly ILauncherSession _session;
+
+        public LoadProgramCore(ILauncherSession session, IRegistryService registryService)
         {
-            App.Current.NoticeOverAllBase = new();
+            _session = session;
+            _session.AccountOverlay = new(session, registryService);
         }
 
         public void LoadLanguageCore()
         {
             // Create LanguageModel FIRST so ApplyToModel has a valid target
-            App.Current.Language ??= new LanguageModel();
+            _session.Language ??= new LanguageModel();
 
             var langService = LanguageService.Instance;
             langService.Initialize();
 
             // Populate LangList for the settings UI
-            App.Current.LangList = langService.AvailableLanguages.Select(l => new LanguageListModel
+            _session.Languages = langService.AvailableLanguages.Select(l => new LanguageListModel
             {
                 LangID = l.Code,
                 LangVersion = "2.0",

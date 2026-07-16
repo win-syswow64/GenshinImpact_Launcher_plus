@@ -1,76 +1,95 @@
-﻿<UserControl x:Class="GenShin_Launcher_Plus.Views.HomePage"
+<UserControl x:Class="GenShin_Launcher_Plus.Views.HomePage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
-             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d">
-    <Grid>
-        <!-- Info Cards -->
-        <StackPanel Margin="32,32,32,0" VerticalAlignment="Top">
-            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12" Padding="16,12">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Border Width="40" Height="40" CornerRadius="20"
-                            Background="#20FFFFFF" Margin="0,0,12,0">
-                        <TextBlock Text="&#xE77B;" FontFamily="{StaticResource IconFont}"
-                                   FontSize="18" Foreground="{DynamicResource AccentBrush}"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding languages.AccountLabel}" Foreground="#80FFFFFF" FontSize="12"/>
-                        <TextBlock Text="{Binding DataContext.SwitchUser, RelativeSource={RelativeSource AncestorType=Window}}"
-                                   Foreground="White" FontSize="15" FontWeight="SemiBold"/>
-                    </StackPanel>
-                </Grid>
-            </Border>
+    <!-- The dashboard mirrors Starward's launcher surface: the background remains the hero,
+         while actions and information stay inside a readable left-side safe area. -->
+    <Grid Margin="74,34,38,38">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-            <Border Style="{StaticResource CardBorder}" Padding="16,12">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Border Width="40" Height="40" CornerRadius="20"
-                            Background="#20FFFFFF" Margin="0,0,12,0">
-                        <TextBlock Text="&#xE8F1;" FontFamily="{StaticResource IconFont}"
-                                   FontSize="18" Foreground="{DynamicResource AccentBrush}"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding languages.ClientLabel}" Foreground="#80FFFFFF" FontSize="12"/>
-                        <TextBlock Text="{Binding DataContext.SwitchPort, RelativeSource={RelativeSource AncestorType=Window}}"
-                                   Foreground="White" FontSize="15" FontWeight="SemiBold"/>
-                    </StackPanel>
-                </Grid>
-            </Border>
+        <StackPanel Grid.Row="0" Width="500" HorizontalAlignment="Left">
+            <TextBlock Text="当前版本" Foreground="#CFFFFFFF" FontSize="15" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding DataContext.CurrentGameDisplayName, RelativeSource={RelativeSource AncestorType=Window}}"
+                       Foreground="White" FontSize="43" FontWeight="SemiBold" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Text="{Binding DataContext.VersionStatusText, RelativeSource={RelativeSource AncestorType=Window}}"
+                       Foreground="#F7D970" FontSize="17" FontWeight="SemiBold" Margin="2,5,0,0" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
 
-        <!-- Bottom: Launch + Settings buttons -->
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
-                    VerticalAlignment="Bottom" Margin="0,0,32,32">
-            <!-- Launch -->
-            <Button Content="{Binding languages.RunGameBtn}"
-                    Style="{StaticResource PrimaryButton}"
-                    Command="{Binding RunGameCommand}"
-                    Height="52" Width="220"
-                    FontSize="18" FontWeight="SemiBold"/>
-            <!-- Verify -->
-            <Button Style="{StaticResource SecondaryButton}" Height="52" Width="52"
-                    FontSize="18" FontFamily="{StaticResource IconFont}"
-                    Command="{Binding VerifyGameCommand}"
-                    ToolTip="校验游戏资源"
-                    Content="&#xE73E;"
-                    Margin="8,0,0,0"/>
-            <!-- Settings -->
-            <Button Style="{StaticResource SecondaryButton}" Height="52" Width="52"
-                    FontSize="18" FontFamily="{StaticResource IconFont}"
-                    Command="{Binding OpenSettingsCommand}"
-                    ToolTip="{Binding languages.GameSettingsBtn}"
-                    Content="&#xE713;"
-                    Margin="8,0,0,0"/>
-        </StackPanel>
+        <Border Grid.Row="1" Width="478" Height="300" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="0,0,0,30"
+                Background="#E918202D" BorderBrush="#2AFFFFFF" BorderThickness="1" CornerRadius="12" ClipToBounds="True">
+            <Grid>
+                <Image Source="/Images/MainBackground.jpg" Stretch="UniformToFill" Opacity="0.85"/>
+                <Rectangle>
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#140A111B" Offset="0"/>
+                            <GradientStop Color="#E918202D" Offset="0.61"/>
+                            <GradientStop Color="#FA171E29" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+                <Grid Margin="16,15,16,14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel VerticalAlignment="Bottom" Margin="0,0,0,12">
+                        <TextBlock Text="游戏资讯" Foreground="White" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding DataContext.NoticeText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                   Foreground="#D9FFFFFF" FontSize="13" Margin="0,7,0,0" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                    <Grid Grid.Row="1" Margin="0,0,0,7">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock Text="活动   公告   资讯" Foreground="#EFFFFFFF" FontSize="15" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="1" Text="&#xE8A7;" FontFamily="{StaticResource IconFont}" Foreground="#AFFFFFFF" FontSize="15"/>
+                    </Grid>
+                    <Border Grid.Row="2" Height="1" Background="#24FFFFFF"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
+                <Border Height="48" MinWidth="230" Background="#C83A4656" BorderBrush="#2CFFFFFF" BorderThickness="1" CornerRadius="24" Padding="17,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <TextBlock Text="&#xE77B;" FontFamily="{StaticResource IconFont}" Foreground="#DFFFFFFF" FontSize="15" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <TextBlock Grid.Column="1" Text="{Binding DataContext.ActiveAccountDisplay, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="White" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    </Grid>
+                </Border>
+                <Button Style="{StaticResource SecondaryButton}" Height="48" Margin="9,0,0,0" Padding="18,0" Command="{Binding DataContext.NavigateUsersCommand, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="切换账号"/><TextBlock Text="&#xE70F;" FontFamily="{StaticResource IconFont}" Margin="10,0,0,0"/></StackPanel>
+                </Button>
+            </StackPanel>
+            <StackPanel Grid.Row="1" HorizontalAlignment="Right">
+                <Border Background="#B826303E" BorderBrush="#29FFFFFF" BorderThickness="1" CornerRadius="12" Padding="13,9" Margin="0,0,0,8"
+                        Visibility="{Binding DataContext.ShowProgressPanel, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Width="360">
+                        <Grid><TextBlock Text="{Binding DataContext.InstallStatusTitle, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="White" FontSize="12"/><TextBlock Text="{Binding DataContext.InstallService.ProgressText, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Right" FontWeight="SemiBold"/></Grid>
+                        <ProgressBar Style="{StaticResource AccentProgressBar}" Value="{Binding DataContext.InstallService.ProgressPercent, RelativeSource={RelativeSource AncestorType=Window}}" Maximum="100" Height="4" Margin="0,8,0,0"/>
+                    </StackPanel>
+                </Border>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Style="{StaticResource SecondaryButton}" Width="54" Height="56" Padding="0" Command="{Binding VerifyGameCommand}" ToolTip="校验游戏资源" Content="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="18"/>
+                    <Button Style="{StaticResource PrimaryButton}" Width="242" Height="56" Margin="9,0,0,0"
+                            Command="{Binding DataContext.RunGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            IsEnabled="{Binding DataContext.ActionButtonEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Content="{Binding DataContext.ActionButtonText, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="18" FontWeight="SemiBold"/>
+                    <Button Style="{StaticResource SecondaryButton}" Width="56" Height="56" Padding="0" Margin="9,0,0,0"
+                            Command="{Binding DataContext.OpenGameSettingsCommand, RelativeSource={RelativeSource AncestorType=Window}}" ToolTip="{Binding languages.GameSettingsBtn}" Content="&#xE713;" FontFamily="{StaticResource IconFont}" FontSize="19"/>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
     </Grid>
 </UserControl>

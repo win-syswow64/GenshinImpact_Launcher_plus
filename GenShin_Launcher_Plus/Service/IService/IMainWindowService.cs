@@ -7,6 +7,7 @@ namespace GenShin_Launcher_Plus.Service.IService
     {
         void CheckConfig(MainWindow main);
         Task MainBackgroundLoadAsync(MainWindowViewModel vm);
+        Task LoadGameBackgroundAsync();
         Task CheckNotice();
     }
 }

@@ -13,10 +13,10 @@ namespace GenShin_Launcher_Plus.ViewModels
     {
         private readonly IUpdateService _updateService;
 
-        public UpdatePageViewModel()
+        public UpdatePageViewModel(IUpdateService updateService)
         {
             DFC = new DownloadHelper();
-            _updateService = new UpdateService();
+            _updateService = updateService;
             UpdateRunCommand = new RelayCommand(RunUpdate);
             ViewControlVisibility = Visibility.Collapsed;
         }

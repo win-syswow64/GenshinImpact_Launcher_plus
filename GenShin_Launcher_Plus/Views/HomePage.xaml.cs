@@ -8,7 +8,7 @@ namespace GenShin_Launcher_Plus.Views
         public HomePage()
         {
             InitializeComponent();
-            DataContext = new HomePageViewModel();
+            DataContext = App.Current.Services.CreateHomePageViewModel();
         }
     }
 }
