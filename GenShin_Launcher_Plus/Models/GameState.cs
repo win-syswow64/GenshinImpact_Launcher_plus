@@ -29,6 +29,8 @@ public enum GameInstallOperation
     Install = 0,
     Update = 1,
     PreDownload = 2,
+    Verify = 3,
+    Repair = 4,
 }
 
 /// <summary>

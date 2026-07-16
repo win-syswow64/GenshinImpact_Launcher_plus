@@ -43,7 +43,7 @@
 
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="70"/>
+                    <ColumnDefinition Width="{Binding SidebarWidth}"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
@@ -55,16 +55,31 @@
                             <RowDefinition Height="*"/>
                             <RowDefinition Height="64"/>
                         </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Text="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="25" Foreground="White"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <StackPanel Grid.Row="1" Margin="8,4" VerticalAlignment="Top">
-                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Margin="0,0,0,9" Command="{Binding NavigateHomeCommand}" ToolTip="主页" Content="&#xE80F;" FontSize="20"/>
-                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Margin="0,0,0,9" Command="{Binding NavigateUsersCommand}" ToolTip="{Binding languages.AccountManageTab}" Content="&#xE77B;" FontSize="20"/>
-                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Margin="0,0,0,9" Command="{Binding OpenImagesDirectoryCommand}" ToolTip="{Binding languages.NavScreenshotsToolTip}" Visibility="{Binding NavScreenshotsVisible}" Content="&#xE8B9;" FontSize="20"/>
-                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Margin="0,0,0,9" Command="{Binding OpenQQGroupUrlCommand}" ToolTip="{Binding languages.NavQQGroupText}" Visibility="{Binding NavQQGroupVisible}" Content="&#xE8B8;" FontSize="20"/>
-                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Command="{Binding OpenAboutCommand}" ToolTip="{Binding languages.NavAboutText}" Visibility="{Binding NavAboutVisible}" Content="&#xE946;" FontSize="20"/>
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="8,0" VerticalAlignment="Center">
+                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Command="{Binding ToggleSidebarCommand}" ToolTip="展开或收起导航" Content="&#xE700;" FontSize="25"/>
+                            <StackPanel Margin="8,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding Title}" Foreground="White" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding ProgramVersionText}" Foreground="#9DFFFFFF" FontSize="10" Margin="0,2,0,0"/>
+                            </StackPanel>
                         </StackPanel>
-                        <Button Grid.Row="2" Style="{StaticResource IconButton}" Width="54" Height="54" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        <StackPanel Grid.Row="1" Margin="8,4" VerticalAlignment="Top">
+                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Margin="0,0,0,9" Command="{Binding NavigateHomeCommand}" ToolTip="主页">
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="主页" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Margin="0,0,0,9" Command="{Binding NavigateUsersCommand}" ToolTip="{Binding languages.AccountManageTab}">
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE77B;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="账号管理" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Margin="0,0,0,9" Command="{Binding OpenImagesDirectoryCommand}" ToolTip="{Binding languages.NavScreenshotsToolTip}" Visibility="{Binding NavScreenshotsVisible}">
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B9;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="截图" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Margin="0,0,0,9" Command="{Binding OpenQQGroupUrlCommand}" ToolTip="{Binding languages.NavQQGroupText}" Visibility="{Binding NavQQGroupVisible}">
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B8;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="社区" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Command="{Binding OpenAboutCommand}" ToolTip="{Binding languages.NavAboutText}" Visibility="{Binding NavAboutVisible}">
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE946;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="关于" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
+                            </Button>
+                        </StackPanel>
+                        <Button Grid.Row="2" Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalAlignment="Left" Margin="8,0" VerticalAlignment="Center"
                                 Command="{Binding NavigateProgramSettingsCommand}" ToolTip="{Binding languages.NavSettingsText}" Content="&#xE713;" FontSize="20"/>
                     </Grid>
                 </Border>
@@ -88,7 +103,7 @@
                                     <Image Source="/ICON.ico" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
                                 <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding CurrentGameDisplayName}" Foreground="White" FontSize="17" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding Title}" Foreground="White" FontSize="17" FontWeight="SemiBold"/>
                                     <TextBlock Text="{Binding ProgramVersionText}" Foreground="#9DFFFFFF" FontSize="11" Margin="0,2,0,0"/>
                                 </StackPanel>
                             </StackPanel>
@@ -129,7 +144,7 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                <ComboBox ItemsSource="{Binding ServerDisplayNames}" SelectedIndex="{Binding SelectedServerIndex}" Style="{StaticResource DarkComboBox}" MinWidth="104" Height="32" FontSize="12" Margin="0,0,12,0"/>
+                                <ComboBox ItemsSource="{Binding ServerDisplayNames}" SelectedIndex="{Binding SelectedServerIndex}" Style="{StaticResource DarkComboBox}" Foreground="White" MinWidth="104" Height="32" FontSize="12" Margin="0,0,12,0"/>
                                 <Button Style="{StaticResource IconButton}" Width="34" Height="34" Command="{Binding MainMinimizedCommand}" ToolTip="{Binding languages.MinimizeToolTip}" Content="&#xE949;"/>
                                 <Button Style="{StaticResource IconButton}" Width="34" Height="34" Command="{Binding ExitProgramCommand}" ToolTip="{Binding languages.CloseToolTip}" Content="&#xE8BB;"/>
                             </StackPanel>

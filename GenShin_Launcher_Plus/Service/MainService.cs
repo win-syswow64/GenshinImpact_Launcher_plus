@@ -214,28 +214,31 @@ namespace GenShin_Launcher_Plus.Service
             if (!Directory.Exists("UserData"))
                 Directory.CreateDirectory("UserData");
 
-            var game = _session.Data.ActiveGame;
-            if (game == null) return;
-            var gamePath = _session.Data.GamePath ?? "";
-            if (!File.Exists(Path.Combine(gamePath, game.CnExeName)) &&
-                !File.Exists(Path.Combine(gamePath, game.GlobalExeName)))
+            bool changed = false;
+            // Discover every supported GameBiz, not merely the game that was
+            // active when the launcher started. Each hit is stored against its
+            // own server-specific path, matching Starward's independent game
+            // entries and preventing a first-game-only scan result.
+            foreach (var profile in GameProfiles.All)
             {
-                Logger.Info("Game path not configured, running auto-search", "Main");
-                var biz = _session.Data.ActiveBiz;
-                var found = GameSearchService.FindGame(game, biz.Server, allowDifferentServer: true);
-                if (found != null)
+                foreach (var biz in profile.GetSupportedServers())
                 {
-                    var gameBiz = $"{game.Id}_{found.Server}";
-                    Logger.Info($"Auto-found game path: {found.Path} ({gameBiz})", "Main");
-                    _session.Data.ActiveGameBiz = gameBiz;
-                    _session.Data.SetGamePath(gameBiz, found.Path);
-                    _session.Data.SaveDataToFile();
-                }
-                else
-                {
-                    Logger.Info("Auto-search found nothing, user can set path in settings", "Main");
+                    var configuredPath = _session.Data.GetExactGamePath(biz.Value);
+                    if (!string.IsNullOrWhiteSpace(configuredPath) &&
+                        File.Exists(Path.Combine(configuredPath, profile.GetExeName(biz))))
+                        continue;
+
+                    var found = GameSearchService.FindGame(profile, biz.Server);
+                    if (found == null) continue;
+
+                    Logger.Info($"Auto-found game path: {found.Path} ({biz})", "Main");
+                    _session.Data.SetGamePath(biz.Value, found.Path);
+                    changed = true;
                 }
             }
+
+            if (changed)
+                _session.Data.SaveDataToFile();
         }
     }
 }

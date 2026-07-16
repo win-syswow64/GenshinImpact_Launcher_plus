@@ -26,6 +26,7 @@ namespace GenShin_Launcher_Plus.Core
             RegisterSingleton<ILaunchService>(new LaunchService(session, userDataService));
             RegisterSingleton<IUpdateService>(new UpdateService());
             RegisterSingleton<ISettingService>(new SettingService());
+            RegisterSingleton(new GameServerSwitchService(session));
         }
 
         public static AppServices CreateDefault(ILauncherSession session) => new(session);
@@ -51,6 +52,7 @@ namespace GenShin_Launcher_Plus.Core
             GetRequiredService<LoadProgramCore>(),
             GetRequiredService<ILauncherSession>(),
             CreateGameInstallService(),
+            GetRequiredService<GameServerSwitchService>(),
             CreateMainWindowService,
             CreateLauncherNavigationService());
 

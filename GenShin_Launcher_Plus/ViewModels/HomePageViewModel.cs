@@ -43,7 +43,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         {
             var biz = _session.Data.ActiveBiz;
             var profile = _session.Data.ActiveGame;
-            var path = _session.Data.GamePath;
+            var path = _session.Data.GetExactGamePath(biz.Value);
             if (profile == null || string.IsNullOrWhiteSpace(path) || !System.IO.Directory.Exists(path))
             {
                 Helper.DialogHelper.ShowWarning(languages.PathErrorMessageStr, languages.Error);

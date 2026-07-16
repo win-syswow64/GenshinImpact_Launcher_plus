@@ -52,7 +52,20 @@ public class GameInstallService : INotifyPropertyChanged
 
     // === Bindable ===
     private GameInstallState _state = GameInstallState.Idle;
-    public GameInstallState State { get => _state; set { _state = value; OnPropertyChanged(); OnPropertyChanged(nameof(IsInstalling)); OnPropertyChanged(nameof(StateText)); } }
+    public GameInstallState State
+    {
+        get => _state;
+        set
+        {
+            _state = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsInstalling));
+            OnPropertyChanged(nameof(IsTaskVisible));
+            OnPropertyChanged(nameof(CanPause));
+            OnPropertyChanged(nameof(CanContinue));
+            OnPropertyChanged(nameof(StateText));
+        }
+    }
 
     private string _statusText = "";
     public string StatusText { get => _statusText; set { _statusText = value; OnPropertyChanged(); } }
@@ -79,6 +92,43 @@ public class GameInstallService : INotifyPropertyChanged
     public string ErrorText { get => _errorText; set { _errorText = value; OnPropertyChanged(); } }
 
     public bool IsInstalling => State is GameInstallState.Downloading or GameInstallState.Preparing or GameInstallState.Extracting or GameInstallState.Verifying;
+
+    /// <summary>Whether this task should remain visible in the launcher panel.</summary>
+    public bool IsTaskVisible => State is not GameInstallState.Idle and not GameInstallState.Finished;
+    public bool CanPause => IsInstalling;
+    public bool CanContinue => State is GameInstallState.Paused or GameInstallState.Error;
+
+    private GameInstallOperation? _operation;
+    public GameInstallOperation? Operation
+    {
+        get => _operation;
+        private set { _operation = value; OnPropertyChanged(); OnPropertyChanged(nameof(OperationText)); }
+    }
+
+    public string ActiveGameBiz { get; private set; } = "";
+    public string ActiveInstallPath { get; private set; } = "";
+    public string OperationText => Operation switch
+    {
+        GameInstallOperation.Install => "下载安装",
+        GameInstallOperation.Update => "游戏更新",
+        GameInstallOperation.PreDownload => "预下载",
+        GameInstallOperation.Verify => "完整性校验",
+        GameInstallOperation.Repair => "资源修复",
+        _ => "游戏任务",
+    };
+
+    private GameResourceVerificationResult? _lastVerification;
+    public GameResourceVerificationResult? LastVerification
+    {
+        get => _lastVerification;
+        private set { _lastVerification = value; OnPropertyChanged(); OnPropertyChanged(nameof(VerificationSummary)); }
+    }
+
+    public string VerificationSummary => LastVerification == null
+        ? ""
+        : LastVerification.IsHealthy
+            ? $"已校验 {LastVerification.TotalFiles} 个文件，资源完整"
+            : $"已校验 {LastVerification.TotalFiles} 个文件：缺失 {LastVerification.MissingFiles}，异常 {LastVerification.InvalidFiles}";
 
     public string StateText => State switch
     {
@@ -125,6 +175,17 @@ public class GameInstallService : INotifyPropertyChanged
     private void StopSpeedTracking() { _speedTimer?.Dispose(); _speedTimer = null; DownloadSpeedText = ""; BytesProgressText = ""; }
     private void ReportBytes(long n) { Interlocked.Add(ref _downloadedBytes, n); Interlocked.Add(ref _speedBytesAccumulator, n); }
 
+    private void BeginOperation(GameInstallOperation operation, string gameBiz, string installPath)
+    {
+        Operation = operation;
+        if (operation == GameInstallOperation.Verify)
+            LastVerification = null;
+        ActiveGameBiz = gameBiz;
+        ActiveInstallPath = installPath;
+        OnPropertyChanged(nameof(ActiveGameBiz));
+        OnPropertyChanged(nameof(ActiveInstallPath));
+    }
+
     // === Helpers ===
 
     public static List<string> GetExistingGameDrives(DataModel data)
@@ -133,7 +194,11 @@ public class GameInstallService : INotifyPropertyChanged
         foreach (var profile in GameProfiles.All)
             foreach (var server in new[] { "cn", "global", "bilibili" })
             {
-                var p = data.GetGamePath($"{profile.Id}_{server}");
+                // A GameBiz owns its own install directory.  Using the legacy
+                // game-level fallback here makes an uninstalled target server
+                // look like it already has an install path and can lead to a
+                // destructive in-place server conversion.
+                var p = data.GetExactGamePath($"{profile.Id}_{server}");
                 if (!string.IsNullOrEmpty(p) && Directory.Exists(p))
                 {
                     var r = Path.GetPathRoot(p);
@@ -145,11 +210,78 @@ public class GameInstallService : INotifyPropertyChanged
 
     public static string GetDefaultInstallDir(DataModel data, string gameBiz)
     {
-        var game = new GameBiz(gameBiz).Game;
+        var biz = new GameBiz(gameBiz);
+        var game = biz.Game;
         var folder = game switch { "genshin" => "Genshin Impact", "starrail" => "Star Rail", "zzz" => "ZenlessZoneZero", "honkai3" => "Honkai Impact 3rd", _ => "miHoYo Game" };
+        // Keep every server in a separate folder.  This is essential for
+        // switching servers safely, while still allowing NTFS hard links to
+        // share identical files between folders on the same drive.
+        folder += $" ({biz.Server})";
         var drives = GetExistingGameDrives(data);
         if (drives.Count > 0) return Path.Combine(drives[0], "Program Files", "miHoYo Launcher", "games", folder);
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), folder);
+    }
+
+    /// <summary>
+    /// Verifies that an install target does not point at another server's
+    /// client.  Server clients may share files through hard links, never by
+    /// sharing their root directory.
+    /// </summary>
+    public static bool TryValidateInstallTarget(DataModel data, string gameBiz, string installPath, out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(installPath))
+        {
+            error = "安装目录不能为空。";
+            return false;
+        }
+
+        string normalized;
+        try
+        {
+            normalized = Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception ex)
+        {
+            error = $"安装目录无效：{ex.Message}";
+            return false;
+        }
+
+        foreach (var profile in GameProfiles.All)
+        {
+            foreach (var server in new[] { "cn", "global", "bilibili" })
+            {
+                var otherBiz = $"{profile.Id}_{server}";
+                if (string.Equals(otherBiz, gameBiz, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var configuredPath = data.GetExactGamePath(otherBiz);
+                if (string.IsNullOrWhiteSpace(configuredPath))
+                    continue;
+
+                try
+                {
+                    var otherNormalized = Path.GetFullPath(configuredPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (string.Equals(normalized, otherNormalized, StringComparison.OrdinalIgnoreCase))
+                    {
+                        error = $"该目录已由 {otherBiz} 使用。不同服务器必须使用独立目录；安装器会通过硬链接复用资源。";
+                        return false;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        var targetBiz = new GameBiz(gameBiz);
+        var detectedServer = GameSearchService.DetectServerFromConfig(normalized);
+        if (!string.IsNullOrWhiteSpace(detectedServer) &&
+            !string.Equals(detectedServer, targetBiz.Server, StringComparison.OrdinalIgnoreCase))
+        {
+            error = $"该目录包含 {detectedServer} 服客户端，不能直接转换为 {targetBiz.Server} 服。请选择一个新的空目录。";
+            return false;
+        }
+
+        return true;
     }
 
     // ================================================
@@ -158,6 +290,7 @@ public class GameInstallService : INotifyPropertyChanged
 
     public async Task InstallGameAsync(string gameBiz, string installPath, CancellationToken ct = default)
     {
+        BeginOperation(GameInstallOperation.Install, gameBiz, installPath);
         _cts?.Dispose();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _cts.Token;
@@ -168,6 +301,13 @@ public class GameInstallService : INotifyPropertyChanged
 
         try
         {
+            if (!TryValidateInstallTarget(_session.Data, gameBiz, installPath, out var installPathError))
+            {
+                State = GameInstallState.Error;
+                ErrorText = installPathError ?? "安装目录不可用。";
+                return;
+            }
+
             Directory.CreateDirectory(installPath);
             string? hardLinkPath = FindHardLinkSource(gameBiz, installPath);
             var hardLinkAudioFields = GetInstalledAudioManifestFields(hardLinkPath);
@@ -287,6 +427,7 @@ public class GameInstallService : INotifyPropertyChanged
 
     public async Task UpdateGameAsync(string gameBiz, string installPath, CancellationToken ct = default)
     {
+        BeginOperation(GameInstallOperation.Update, gameBiz, installPath);
         _cts?.Dispose();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _cts.Token;
@@ -357,6 +498,7 @@ public class GameInstallService : INotifyPropertyChanged
 
     public async Task PreDownloadAsync(string gameBiz, string installPath, CancellationToken ct = default)
     {
+        BeginOperation(GameInstallOperation.PreDownload, gameBiz, installPath);
         _cts?.Dispose();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _cts.Token;
@@ -419,6 +561,7 @@ public class GameInstallService : INotifyPropertyChanged
 
     public async Task<List<GameResourceIssue>> VerifyGameResourcesAsync(string gameBiz, string installPath, CancellationToken ct = default)
     {
+        BeginOperation(GameInstallOperation.Verify, gameBiz, installPath);
         _cts?.Dispose();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _cts.Token;
@@ -444,19 +587,9 @@ public class GameInstallService : INotifyPropertyChanged
             if (plan == null)
                 throw new InvalidOperationException("无法获取资源清单");
 
-            StatusText = $"正在校验 {plan.TotalFiles} 个文件...";
-            await MarkLocalFilesAsync(plan, installPath, token);
-
-            var issues = plan.Files
-                .Where(f => !f.IsFinished)
-                .Select(f => new GameResourceIssue
-                {
-                    RelativePath = f.RelativePath,
-                    Size = f.Size,
-                    MD5 = f.MD5,
-                    ManifestField = f.ManifestField,
-                })
-                .ToList();
+            var verification = await VerifyPlanFilesAsync(plan, installPath, token);
+            LastVerification = verification;
+            var issues = verification.Issues;
 
             State = GameInstallState.Finished;
             StatusText = issues.Count == 0 ? "资源校验完成，未发现问题" : $"资源校验完成，发现 {issues.Count} 个异常文件";
@@ -480,6 +613,7 @@ public class GameInstallService : INotifyPropertyChanged
 
     public async Task RepairGameAsync(string gameBiz, string installPath, CancellationToken ct = default)
     {
+        BeginOperation(GameInstallOperation.Repair, gameBiz, installPath);
         _cts?.Dispose();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _cts.Token;
@@ -548,7 +682,32 @@ public class GameInstallService : INotifyPropertyChanged
         catch (Exception ex) { Logger.Error($"Repair failed: {ex}", "Install"); State = GameInstallState.Error; ErrorText = ex.Message; StopSpeedTracking(); }
     }
 
-    public void Pause() { try { _cts?.Cancel(); } catch { } }
+    public void Pause()
+    {
+        if (!CanPause) return;
+        try { _cts?.Cancel(); } catch { }
+    }
+
+    /// <summary>
+    /// Starts the most recently paused or failed operation again. Downloaded
+    /// chunks and completed files are retained, so this is a true continuation
+    /// for chunk downloads and pre-download caches.
+    /// </summary>
+    public Task ContinueAsync(CancellationToken ct = default)
+    {
+        if (!CanContinue || Operation == null || string.IsNullOrWhiteSpace(ActiveGameBiz) || string.IsNullOrWhiteSpace(ActiveInstallPath))
+            return Task.CompletedTask;
+
+        return Operation.Value switch
+        {
+            GameInstallOperation.Install => InstallGameAsync(ActiveGameBiz, ActiveInstallPath, ct),
+            GameInstallOperation.Update => UpdateGameAsync(ActiveGameBiz, ActiveInstallPath, ct),
+            GameInstallOperation.PreDownload => PreDownloadAsync(ActiveGameBiz, ActiveInstallPath, ct),
+            GameInstallOperation.Verify => VerifyGameResourcesAsync(ActiveGameBiz, ActiveInstallPath, ct),
+            GameInstallOperation.Repair => RepairGameAsync(ActiveGameBiz, ActiveInstallPath, ct),
+            _ => Task.CompletedTask,
+        };
+    }
 
     // ================================================
     //  Parallel runner (cancellation-safe)
@@ -615,6 +774,74 @@ public class GameInstallService : INotifyPropertyChanged
 
         return matched;
     }
+
+    /// <summary>
+    /// Verifies every manifest file independently.  Unlike the download fast
+    /// path, this never trusts a size match: when a manifest provides an MD5 it
+    /// is always checked, so callers can report missing, size-invalid and
+    /// hash-invalid files separately.
+    /// </summary>
+    private async Task<GameResourceVerificationResult> VerifyPlanFilesAsync(ChunkDownloadPlan plan, string installPath, CancellationToken ct)
+    {
+        var result = new GameResourceVerificationResult { TotalFiles = plan.Files.Count };
+        var issues = new ConcurrentBag<GameResourceIssue>();
+        int valid = 0, missing = 0, invalid = 0, done = 0;
+        int degree = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
+        StatusText = $"正在校验 {plan.TotalFiles} 个文件...";
+
+        await Task.Run(() =>
+        {
+            Parallel.ForEach(plan.Files, new ParallelOptions { MaxDegreeOfParallelism = degree, CancellationToken = ct }, file =>
+            {
+                ct.ThrowIfCancellationRequested();
+                var localPath = ResolveSafeChildPath(installPath, file.RelativePath);
+                GameResourceIssue? issue = null;
+                if (localPath == null || !File.Exists(localPath))
+                {
+                    issue = CreateResourceIssue(file, "缺失");
+                    Interlocked.Increment(ref missing);
+                }
+                else if (new FileInfo(localPath).Length != file.Size)
+                {
+                    issue = CreateResourceIssue(file, "文件大小不匹配");
+                    Interlocked.Increment(ref invalid);
+                }
+                else if (!string.IsNullOrWhiteSpace(file.MD5) && !VerifyFileMD5(localPath, file.MD5))
+                {
+                    issue = CreateResourceIssue(file, "MD5 校验失败");
+                    Interlocked.Increment(ref invalid);
+                }
+                else
+                {
+                    file.IsFinished = true;
+                    Interlocked.Increment(ref valid);
+                }
+
+                if (issue != null) issues.Add(issue);
+                var current = Interlocked.Increment(ref done);
+                if (current % 50 == 0 || current == plan.TotalFiles)
+                {
+                    ProgressPercent = plan.TotalFiles == 0 ? 100 : (double)current / plan.TotalFiles * 100;
+                    StatusText = $"正在校验文件 ({current}/{plan.TotalFiles})...";
+                }
+            });
+        }, ct);
+
+        result.ValidFiles = valid;
+        result.MissingFiles = missing;
+        result.InvalidFiles = invalid;
+        result.Issues = issues.OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase).ToList();
+        return result;
+    }
+
+    private static GameResourceIssue CreateResourceIssue(ChunkDownloadFile file, string reason) => new()
+    {
+        RelativePath = file.RelativePath,
+        Size = file.Size,
+        MD5 = file.MD5,
+        ManifestField = file.ManifestField,
+        Reason = reason,
+    };
 
     /// <summary>
     /// Files in high-risk directories where size-only matching is insufficient.
@@ -1725,4 +1952,15 @@ public class GameResourceIssue
     public long Size { get; set; }
     public string MD5 { get; set; } = "";
     public string ManifestField { get; set; } = "";
+    public string Reason { get; set; } = "";
+}
+
+public class GameResourceVerificationResult
+{
+    public int TotalFiles { get; set; }
+    public int ValidFiles { get; set; }
+    public int MissingFiles { get; set; }
+    public int InvalidFiles { get; set; }
+    public List<GameResourceIssue> Issues { get; set; } = new();
+    public bool IsHealthy => MissingFiles == 0 && InvalidFiles == 0;
 }

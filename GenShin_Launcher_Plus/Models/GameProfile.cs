@@ -32,14 +32,19 @@ namespace GenShin_Launcher_Plus.Models
             {
                 try
                 {
-                    var biz = App.Current.DataModel?.ActiveBiz;
-                    string exe = biz is GameBiz b ? GetExeName(b) : CnExeName;
-                    string path = App.Current.DataModel?.GetGamePath($"{Id}_cn") ?? "";
-                    if (!string.IsNullOrEmpty(path) && File.Exists(System.IO.Path.Combine(path, exe)))
-                        return true;
-                    path = App.Current.DataModel?.GetGamePath($"{Id}_global") ?? "";
-                    if (!string.IsNullOrEmpty(path) && File.Exists(System.IO.Path.Combine(path, exe)))
-                        return true;
+                    var data = App.Current.DataModel;
+                    if (data == null) return false;
+
+                    // Each GameBiz owns an independent path and executable.
+                    // Do not use the active game's executable or the legacy
+                    // fallback path, otherwise only the first selected game is
+                    // detected correctly in the top game selector.
+                    foreach (var biz in GetSupportedServers())
+                    {
+                        var path = data.GetExactGamePath(biz.Value);
+                        if (!string.IsNullOrWhiteSpace(path) && File.Exists(Path.Combine(path, GetExeName(biz))))
+                            return true;
+                    }
                 }
                 catch { }
                 return false;

@@ -32,7 +32,15 @@ namespace GenShin_Launcher_Plus.Service
                 DialogHelper.ShowWarning(_session.Language!.PathErrorMessageStr, _session.Language.Error);
                 return;
             }
-            var gamePath = _session.Data.GamePath;
+            // Do not launch through the legacy per-game fallback: it may be
+            // another server's client after the user switches GameBiz.
+            var gamePath = _session.Data.GetExactGamePath(biz.Value);
+            if (string.IsNullOrWhiteSpace(gamePath))
+            {
+                Logger.Warn($"No exact install path configured for {biz}", "Launch");
+                DialogHelper.ShowWarning(_session.Language!.PathErrorMessageStr, _session.Language.Error);
+                return;
+            }
 
             string exeName = profile.GetExeName(biz);
             string gameMain = Path.Combine(gamePath, exeName);

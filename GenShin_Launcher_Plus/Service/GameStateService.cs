@@ -64,7 +64,9 @@ public static class GameStateService
             return info;
         }
 
-        var installPath = data.GetGamePath(gameBiz);
+        // Only the exact GameBiz path is valid here.  A legacy per-game
+        // fallback can belong to a different server client.
+        var installPath = data.GetExactGamePath(gameBiz);
         info.InstallPath = installPath;
         info.IsInstalled = IsGameInstalled(installPath, profile, new GameBiz(gameBiz));
         info.LocalVersion = GetLocalVersion(installPath);

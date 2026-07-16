@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -29,6 +30,8 @@ public static class HoYoPlayApiService
     {
         PropertyNameCaseInsensitive = true,
     };
+
+    private static readonly ConcurrentDictionary<string, (DateTimeOffset CachedAt, GameLauncherContent Content)> _gameContentCache = new(StringComparer.OrdinalIgnoreCase);
 
     #region API Calls
 
@@ -78,6 +81,80 @@ public static class HoYoPlayApiService
         if (package?.Main?.Major?.Version != null) return (package.Main.Major.Version, package.PreDownload?.Major?.Version);
         return (null, null);
     }
+
+    /// <summary>
+    /// Retrieves the current game's official HoYoPlay posts. This mirrors
+    /// Starward's getGameContent flow and intentionally does not use the old
+    /// third-party notice endpoint.
+    /// </summary>
+    public static async Task<GameLauncherContent> GetGameLauncherContentAsync(string gameBiz, CancellationToken ct = default)
+    {
+        if (_gameContentCache.TryGetValue(gameBiz, out var cached) && DateTimeOffset.UtcNow - cached.CachedAt < TimeSpan.FromMinutes(5))
+            return cached.Content;
+
+        try
+        {
+            var launcherId = HoYoPlayGameMap.GetLauncherId(gameBiz);
+            var gameId = HoYoPlayGameMap.GetApiGameId(gameBiz);
+            var baseUrl = HoYoPlayGameMap.GetApiBaseUrl(gameBiz);
+            if (string.IsNullOrWhiteSpace(launcherId) || string.IsNullOrWhiteSpace(gameId))
+                return new GameLauncherContent();
+
+            var url = $"{baseUrl}getGameContent?launcher_id={launcherId}&language=zh-cn&game_id={gameId}";
+            Logger.Debug($"Fetching official game content: {url}", "HoYoPlay");
+            var json = await _httpClient.GetStringAsync(url, ct).ConfigureAwait(false);
+            var response = JsonSerializer.Deserialize<HoYoApiResponse<GameContentResponse>>(json, _jsonOptions);
+            if (response?.Retcode != 0)
+            {
+                Logger.Warn($"GetGameContent error: {response?.Retcode} {response?.Message}", "HoYoPlay");
+                return new GameLauncherContent();
+            }
+
+            var content = response.Data?.Content;
+            var items = (content?.Posts ?? new List<GameContentPost>())
+                .Where(x => !string.IsNullOrWhiteSpace(x.Title) && IsSafeNewsLink(x.Link))
+                .Select(x => new GameNewsItem
+                {
+                    Title = x.Title!.Trim(),
+                    Link = x.Link!.Trim(),
+                    Date = x.Date?.Trim() ?? "",
+                    Category = GetNewsCategory(x.Type),
+                })
+                .ToList();
+
+            var banners = (content?.Banners ?? new List<GameContentBanner>())
+                .Select(x => x.Image)
+                .Where(x => x != null && IsSafeImageUrl(x.Url) && IsSafeNewsLink(x.Link))
+                .Select(x => new GameBannerItem { ImageUrl = x!.Url!.Trim(), Link = x.Link!.Trim() })
+                .ToList();
+
+            var result = new GameLauncherContent { Banners = banners, News = items };
+            _gameContentCache[gameBiz] = (DateTimeOffset.UtcNow, result);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"GetGameContent: {ex.Message}", "HoYoPlay");
+            return new GameLauncherContent();
+        }
+    }
+
+    public static async Task<IReadOnlyList<GameNewsItem>> GetGameNewsAsync(string gameBiz, CancellationToken ct = default)
+        => (await GetGameLauncherContentAsync(gameBiz, ct).ConfigureAwait(false)).News;
+
+    private static bool IsSafeNewsLink(string? link) => Uri.TryCreate(link, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static bool IsSafeImageUrl(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static string GetNewsCategory(string? type) => type switch
+    {
+        "POST_TYPE_ACTIVITY" => "活动",
+        "POST_TYPE_ANNOUNCE" => "公告",
+        "POST_TYPE_INFO" => "资讯",
+        _ => "资讯",
+    };
 
     public static async Task<GameChannelSdkInfo?> GetGameChannelSDKAsync(string gameBiz, CancellationToken ct = default)
     {
