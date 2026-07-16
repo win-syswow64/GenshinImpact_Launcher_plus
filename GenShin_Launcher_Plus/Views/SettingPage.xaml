@@ -144,15 +144,88 @@
                 <!-- Tab 1: Account Management -->
                 <TabItem>
                     <TabItem.Template><ControlTemplate TargetType="TabItem"><ContentPresenter/></ControlTemplate></TabItem.Template>
-                    <Grid Margin="24,16">
-                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                        <Border Grid.Row="0" Style="{StaticResource CardBorder}">
-                            <GroupBox Header="{Binding languages.AccountListHeader}" Style="{StaticResource DarkGroupBox}">
-                                <ListBox Style="{StaticResource DarkListBox}" ItemContainerStyle="{StaticResource DarkListBoxItem}" DisplayMemberPath="UserName" ItemsSource="{Binding UserLists}" SelectedValue="{Binding SwitchUser, Mode=OneWayToSource}"/>
-                            </GroupBox>
-                        </Border>
-                        <Button Grid.Row="1" Content="{Binding languages.DelUserBtn}" Style="{StaticResource SecondaryButton}" Command="{Binding DeleteUserCommand}" Margin="0,12,0,0" HorizontalAlignment="Left"/>
-                    </Grid>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,16,24,24">
+                        <StackPanel MaxWidth="680">
+                            <TextBlock Style="{StaticResource SectionHeaderText}" Text="{Binding languages.AccountListHeader}"/>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0"
+                                         Style="{StaticResource InputTextBox}"
+                                         Text="{Binding AccountName, UpdateSourceTrigger=PropertyChanged}"/>
+                                <Button Grid.Column="1"
+                                        Content="{Binding languages.SaveBtn}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Command="{Binding SaveCurrentAccountCommand}"
+                                        Height="36"
+                                        Padding="18,0"
+                                        Margin="8,0,0,0"/>
+                            </Grid>
+
+                            <Border Style="{StaticResource CardBorder}">
+                                <ListBox Style="{StaticResource DarkListBox}"
+                                         ItemContainerStyle="{StaticResource DarkListBoxItem}"
+                                         ItemsSource="{Binding UserLists}"
+                                         SelectedItem="{Binding SelectedAccount, Mode=TwoWay}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock Text="{Binding DisplayName}"
+                                                               Foreground="White"
+                                                               FontSize="14"
+                                                               FontWeight="SemiBold"/>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                                        <TextBlock Text="{Binding GameBiz}" Foreground="#80FFFFFF" FontSize="11"/>
+                                                        <TextBlock Text="  UID " Foreground="#50FFFFFF" FontSize="11"/>
+                                                        <TextBlock Text="{Binding Uid}" Foreground="#80FFFFFF" FontSize="11"/>
+                                                        <TextBlock Text="  " Foreground="#50FFFFFF" FontSize="11"/>
+                                                        <TextBlock Text="{Binding SavedAt}" Foreground="#60FFFFFF" FontSize="11"/>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="&#xE73E;"
+                                                           FontFamily="{StaticResource IconFont}"
+                                                           Foreground="{DynamicResource AccentBrush}"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Content="{Binding languages.SwitchAccountButton}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Command="{Binding ApplySelectedAccountCommand}"
+                                        Height="36"
+                                        Padding="18,0"/>
+                                <Button Content="{Binding languages.DelUserBtn}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Command="{Binding DeleteUserCommand}"
+                                        Height="36"
+                                        Padding="18,0"
+                                        Margin="8,0,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabItem>
 
                 <!-- Tab 3: Theme Settings -->

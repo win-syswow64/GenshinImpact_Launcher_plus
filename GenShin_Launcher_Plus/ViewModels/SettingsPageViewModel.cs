@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -34,6 +34,8 @@ namespace GenShin_Launcher_Plus.ViewModels
             _navAbout = App.Current.DataModel.NavAbout;
 
             DeleteUserCommand = new RelayCommand(DeleteUser);
+            SaveCurrentAccountCommand = new RelayCommand(SaveCurrentAccount);
+            ApplySelectedAccountCommand = new RelayCommand(ApplySelectedAccount);
             SaveSettingsCommand = new RelayCommand(SaveSettings);
             SaveLangCommand = new RelayCommand(SaveAndRestart);
             ThisPageRemoveCommand = new RelayCommand(ThisPageRemove);
@@ -56,7 +58,10 @@ namespace GenShin_Launcher_Plus.ViewModels
 
             InstallAudioPackCommand = new RelayCommand<string>(InstallAudioPack);
             _accentColorIndex = FindAccentColorIndex(App.Current.DataModel.AccentColor);
-            _userLists = UserDataService.ReadUserList();
+            _userLists = ReadAccountListForActiveBiz();
+            _selectedAccount = _userLists.FirstOrDefault(x => x.IsCurrent) ?? _userLists.FirstOrDefault();
+            if (_selectedAccount != null)
+                _switchUser = _selectedAccount.UserName;
             RefreshAudioPacks();
             _gamePortLists = SettingService.CreateGamePortList();
             _displaySizeLists = SettingService.CreateDisplaySizeList();
@@ -193,8 +198,34 @@ namespace GenShin_Launcher_Plus.ViewModels
         public string? SwitchUser
         {
             get => _switchUser;
-            set { if (value != null) { App.Current.DataModel.SwitchUser = value; SetProperty(ref _switchUser, value); } }
+            set
+            {
+                var normalized = value ?? string.Empty;
+                App.Current.DataModel.SwitchUser = normalized;
+                SetProperty(ref _switchUser, string.IsNullOrEmpty(normalized) ? null : normalized);
+                SelectedAccount = string.IsNullOrEmpty(normalized)
+                    ? null
+                    : UserLists?.FirstOrDefault(x => x.UserName == normalized) ?? SelectedAccount;
+            }
         }
+
+        private UserListModel? _selectedAccount;
+        public UserListModel? SelectedAccount
+        {
+            get => _selectedAccount;
+            set
+            {
+                if (SetProperty(ref _selectedAccount, value) && value != null)
+                {
+                    _switchUser = value.UserName;
+                    OnPropertyChanged(nameof(SwitchUser));
+                    AccountName = value.DisplayName;
+                }
+            }
+        }
+
+        private string _accountName = string.Empty;
+        public string AccountName { get => _accountName; set => SetProperty(ref _accountName, value); }
 
         private bool _isPopup;
         public bool IsPopup
@@ -432,6 +463,8 @@ namespace GenShin_Launcher_Plus.ViewModels
 
         // --- Commands ---
         public ICommand DeleteUserCommand { get; }
+        public ICommand SaveCurrentAccountCommand { get; }
+        public ICommand ApplySelectedAccountCommand { get; }
         public ICommand SaveSettingsCommand { get; }
         public ICommand ThisPageRemoveCommand { get; }
         public ICommand ChooseGamePathCommand { get; }
@@ -662,17 +695,127 @@ namespace GenShin_Launcher_Plus.ViewModels
 
         private void DeleteUser()
         {
-            if (!string.IsNullOrEmpty(SwitchUser))
+            var userName = SelectedAccount?.UserName ?? SwitchUser;
+            if (!string.IsNullOrEmpty(userName))
             {
-                var result = DialogHelper.ShowYesNo($"{languages.WarningDAW}[{SwitchUser}] ? !", languages.Warning);
+                var displayName = SelectedAccount?.DisplayName ?? Service.UserDataService.GetAccountDisplayName(userName);
+                var result = DialogHelper.ShowYesNo($"{languages.WarningDAW}[{displayName}] ? !", languages.Warning);
                 if (result)
                 {
-                    File.Delete(Path.Combine("UserData", SwitchUser));
-                    UserLists = UserDataService.ReadUserList();
-                    App.Current.NoticeOverAllBase.UserLists = UserLists;
+                    File.Delete(Path.Combine("UserData", userName));
+                    RefreshAccountList();
                 }
             }
             else DialogHelper.ShowWarning(languages.ErrorSA, languages.Error);
+        }
+
+        private void SaveCurrentAccount()
+        {
+            try
+            {
+                var displayName = SanitizeAccountFileName(AccountName);
+                if (string.IsNullOrWhiteSpace(displayName))
+                    displayName = $"{App.Current.DataModel.ActiveBiz}_{DateTime.Now:yyyyMMdd_HHmmss}";
+
+                Directory.CreateDirectory("UserData");
+                var fileName = Service.UserDataService.BuildAccountFileName(App.Current.DataModel.ActiveGameBiz, displayName);
+                var filePath = Path.Combine("UserData", fileName);
+                if (File.Exists(filePath) && !DialogHelper.ShowYesNo($"{languages.WarningDAW}[{displayName}] ? !", languages.Warning))
+                    return;
+
+                var port = GetRegistryPortName(App.Current.DataModel.ActiveBiz);
+                var data = RegistryService.GetFromRegistry(displayName, port, true);
+                if (string.IsNullOrWhiteSpace(data))
+                {
+                    DialogHelper.ShowWarning(languages.SaveAccountErr, languages.Error);
+                    return;
+                }
+
+                File.WriteAllText(filePath, data);
+                App.Current.DataModel.SwitchUser = fileName;
+                RefreshAccountList(fileName);
+                App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab} : {displayName}";
+                App.Current.NoticeOverAllBase.IsSwitchUser = Visibility.Visible;
+                FlashSaveIndicator();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Save account failed: {ex.Message}", "Settings");
+                DialogHelper.ShowWarning(languages.SaveAccountErr, languages.Error);
+            }
+        }
+
+        private void ApplySelectedAccount()
+        {
+            var account = SelectedAccount ?? UserLists.FirstOrDefault(x => x.UserName == SwitchUser);
+            var userName = account?.UserName ?? SwitchUser;
+            if (string.IsNullOrWhiteSpace(userName))
+            {
+                DialogHelper.ShowWarning(languages.ErrorSA, languages.Error);
+                return;
+            }
+
+            try
+            {
+                var activeBiz = App.Current.DataModel.ActiveGameBiz;
+                if (account == null || !string.Equals(account.GameBiz, activeBiz, StringComparison.OrdinalIgnoreCase))
+                {
+                    DialogHelper.ShowWarning($"账号属于 {account?.GameBiz ?? "未知"}，当前为 {activeBiz}，不能跨游戏或跨服务器还原。", languages.Warning);
+                    return;
+                }
+                RegistryService.SetToRegistry(userName);
+                App.Current.DataModel.SwitchUser = userName;
+                SwitchUser = userName;
+                App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab} : {account.DisplayName}";
+                App.Current.NoticeOverAllBase.IsSwitchUser = Visibility.Visible;
+                RefreshAccountList(userName);
+                FlashSaveIndicator();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Apply account failed: {ex.Message}", "Settings");
+                DialogHelper.ShowWarning(languages.ErrorSA, languages.Error);
+            }
+        }
+
+        private void RefreshAccountList(string? selectedUser = null)
+        {
+            UserLists = ReadAccountListForActiveBiz();
+            App.Current.NoticeOverAllBase.UserLists = UserLists;
+            var target = selectedUser ?? SelectedAccount?.UserName ?? SwitchUser;
+            SelectedAccount = UserLists.FirstOrDefault(x => x.UserName == target) ?? UserLists.FirstOrDefault();
+            SwitchUser = SelectedAccount?.UserName;
+            if (SelectedAccount == null)
+                App.Current.NoticeOverAllBase.IsSwitchUser = Visibility.Collapsed;
+        }
+
+        private List<UserListModel> ReadAccountListForActiveBiz()
+        {
+            var activeBiz = App.Current.DataModel.ActiveGameBiz;
+            return UserDataService.ReadUserList()
+                .Where(x => string.Equals(x.GameBiz, activeBiz, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        public void RefreshForActiveGame()
+        {
+            GamePath = App.Current.DataModel.GamePath;
+            SwitchUser = App.Current.DataModel.SwitchUser;
+            OnPropertyChanged(nameof(IsMihoyo));
+            OnPropertyChanged(nameof(CurrentServerDisplay));
+            RefreshAccountList(App.Current.DataModel.SwitchUser);
+            RefreshAudioPacks();
+        }
+
+        private static string GetRegistryPortName(GameBiz biz)
+            => biz.IsGlobalServer() ? "Global" : "CN";
+
+        private static string SanitizeAccountFileName(string? name)
+        {
+            name = (name ?? "").Trim();
+            foreach (var c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name;
         }
 
         private void SaveSettings()
@@ -691,7 +834,8 @@ namespace GenShin_Launcher_Plus.ViewModels
             Logger.Info($"Saving game path: {GamePath} for {biz}", "Settings");
             if (!string.IsNullOrEmpty(SwitchUser))
             {
-                App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab}��{SwitchUser}";
+                var displayName = SelectedAccount?.DisplayName ?? Service.UserDataService.GetAccountDisplayName(SwitchUser);
+                App.Current.NoticeOverAllBase.SwitchUser = $"{languages.UserNameLab} : {displayName}";
                 App.Current.NoticeOverAllBase.IsSwitchUser = Visibility.Visible;
                 RegistryService.SetToRegistry(SwitchUser);
             }

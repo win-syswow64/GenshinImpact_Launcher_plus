@@ -57,6 +57,13 @@
                     Command="{Binding RunGameCommand}"
                     Height="52" Width="220"
                     FontSize="18" FontWeight="SemiBold"/>
+            <!-- Verify -->
+            <Button Style="{StaticResource SecondaryButton}" Height="52" Width="52"
+                    FontSize="18" FontFamily="{StaticResource IconFont}"
+                    Command="{Binding VerifyGameCommand}"
+                    ToolTip="校验游戏资源"
+                    Content="&#xE73E;"
+                    Margin="8,0,0,0"/>
             <!-- Settings -->
             <Button Style="{StaticResource SecondaryButton}" Height="52" Width="52"
                     FontSize="18" FontFamily="{StaticResource IconFont}"

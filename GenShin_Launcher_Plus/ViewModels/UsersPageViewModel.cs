@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -40,8 +40,16 @@ namespace GenShin_Launcher_Plus.ViewModels
             string gamePort = isGlobal ? "Global" : "CN";
             if (!string.IsNullOrEmpty(Name))
             {
-                string userdata = RegistryService.GetFromRegistry(Name, gamePort, IsSaveGameConfig);
-                File.WriteAllText(Path.Combine(Directory.GetCurrentDirectory(), "UserData", Name), userdata);
+                var accountName = Name.Trim();
+                string? userdata = RegistryService.GetFromRegistry(accountName, gamePort, IsSaveGameConfig);
+                if (string.IsNullOrWhiteSpace(userdata))
+                {
+                    DialogHelper.ShowWarning(languages.SaveAccountErr, languages.Error);
+                    return;
+                }
+                Directory.CreateDirectory("UserData");
+                var fileName = Service.UserDataService.BuildAccountFileName(App.Current.DataModel.ActiveGameBiz, accountName);
+                File.WriteAllText(Path.Combine(Directory.GetCurrentDirectory(), "UserData", fileName), userdata);
                 App.Current.NoticeOverAllBase.UserLists = UserDataService.ReadUserList();
                 RemoveThisPage();
             }

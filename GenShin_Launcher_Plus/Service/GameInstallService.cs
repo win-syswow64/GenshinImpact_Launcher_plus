@@ -1,9 +1,10 @@
-﻿﻿using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
@@ -200,30 +201,8 @@ public class GameInstallService : INotifyPropertyChanged
             if (hardLinkPath != null)
             {
                 State = GameInstallState.Verifying;
-                var toLink = plan.Files.Where(f => !f.IsFinished).ToList();
-                int hlTotal = toLink.Count, hlDone = 0;
-
-            // Run hard link creation on background thread (MD5 verification is CPU-bound)
-                var hlResult = await Task.Run(() =>
-                {
-                    int linked = 0;
-                    foreach (var file in toLink)
-                    {
-                        token.ThrowIfCancellationRequested();
-                        if (TryHardLinkBySize(file, hardLinkPath))
-                            linked++;
-                        var done = Interlocked.Increment(ref hlDone);
-
-                        // Report progress every 50 files
-                        if (done % 50 == 0 || done == hlTotal)
-                        {
-                            ProgressPercent = (double)done / hlTotal * 100;
-                            StatusText = $"正在创建硬链接 ({done}/{hlTotal}, 成功 {linked})...";
-                        }
-                    }
-                    return linked;
-                }, token);
-                hardLinked = hlResult;
+                hardLinked = await HardLinkFilesAsync(plan, hardLinkPath, token);
+                int hlTotal = plan.Files.Count(f => !f.IsFinished) + hardLinked;
                 Logger.Info($"Hard-linked: {hardLinked}/{hlTotal} files", "Install");
                 StatusText = $"硬链接完成: {hardLinked}/{hlTotal} 个文件";
             }
@@ -251,7 +230,8 @@ public class GameInstallService : INotifyPropertyChanged
             if (toDownload.Count == 0)
             {
                 State = GameInstallState.Verifying; StatusText = "正在写入配置...";
-                SetGameConfigIni(gameBiz, installPath, plan.Version);
+                var sdkVersion = await DownloadGameChannelSdkAsync(gameBiz, installPath, token);
+                SetGameConfigIni(gameBiz, installPath, plan.Version, sdkVersion);
                 State = GameInstallState.Finished;
                 StatusText = deferredAudioFiles.Count > 0 ? "安装完成，部分语音包可在设置中补装" : "安装完成";
                 ProgressPercent = 100;
@@ -282,7 +262,8 @@ public class GameInstallService : INotifyPropertyChanged
             // ── Phase 5: Config ──
             StopSpeedTracking();
             State = GameInstallState.Verifying; StatusText = "正在写入配置...";
-            SetGameConfigIni(gameBiz, installPath, plan.Version);
+            var finalSdkVersion = await DownloadGameChannelSdkAsync(gameBiz, installPath, token);
+            SetGameConfigIni(gameBiz, installPath, plan.Version, finalSdkVersion);
             CleanupTempFiles(installPath);
             State = GameInstallState.Finished;
             StatusText = deferredAudioFiles.Count > 0 ? "安装完成，部分语音包可在设置中补装" : "安装完成";
@@ -328,7 +309,8 @@ public class GameInstallService : INotifyPropertyChanged
 
             if (toDownload.Count == 0)
             {
-                SetGameConfigIni(gameBiz, installPath, plan.Version);
+                var sdkVersion = await DownloadGameChannelSdkAsync(gameBiz, installPath, token);
+                SetGameConfigIni(gameBiz, installPath, plan.Version, sdkVersion);
                 CleanupTempFiles(installPath);
                 State = GameInstallState.Finished;
                 StatusText = "已是最新";
@@ -381,8 +363,11 @@ public class GameInstallService : INotifyPropertyChanged
             if (branch?.PreDownload == null) { State = GameInstallState.Error; ErrorText = "无可预下载内容"; return; }
 
             var localVersion = GameStateService.GetLocalVersion(installPath);
+            var audioManifestFields = GetInstalledAudioManifestFields(installPath);
             var plan = await HoYoPlayApiService.ResolveChunkDownloadPlanAsync(gameBiz, branch.PreDownload, installPath, localVersion?.ToString() ?? "",
-                status => { StatusText = status; Logger.Debug(status, "PreDownload"); }, token);
+                status => { StatusText = status; Logger.Debug(status, "PreDownload"); }, token,
+                includeAudioManifests: audioManifestFields.Count > 0,
+                audioManifestFields: audioManifestFields.Count > 0 ? audioManifestFields : null);
             if (plan == null || plan.Files.Count == 0) { State = GameInstallState.Finished; StatusText = "无预下载"; return; }
 
             var chunks = BuildPredownloadChunkList(plan, installPath);
@@ -391,7 +376,7 @@ public class GameInstallService : INotifyPropertyChanged
 
             if (toDownload.Count == 0)
             {
-                MarkPredownload(gameBiz, installPath, localVersion?.ToString(), branch.PreDownload.Tag);
+                MarkPredownload(gameBiz, installPath, localVersion?.ToString(), branch.PreDownload.Tag, audioManifestFields);
                 State = GameInstallState.Finished;
                 StatusText = "预下载完成";
                 ProgressPercent = 100;
@@ -413,12 +398,147 @@ public class GameInstallService : INotifyPropertyChanged
 
             if (token.IsCancellationRequested) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); return; }
 
-            MarkPredownload(gameBiz, installPath, localVersion?.ToString(), branch.PreDownload.Tag);
+            MarkPredownload(gameBiz, installPath, localVersion?.ToString(), branch.PreDownload.Tag, audioManifestFields);
             StopSpeedTracking();
             State = GameInstallState.Finished; StatusText = "预下载完成"; ProgressPercent = 100;
         }
         catch (OperationCanceledException) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); }
         catch (Exception ex) { Logger.Error($"Predownload failed: {ex}", "Install"); State = GameInstallState.Error; ErrorText = ex.Message; StopSpeedTracking(); }
+    }
+
+    // ================================================
+    //  Verify / Repair
+    // ================================================
+
+    public async Task<List<GameResourceIssue>> VerifyGameResourcesAsync(string gameBiz, string installPath, CancellationToken ct = default)
+    {
+        _cts?.Dispose();
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var token = _cts.Token;
+        State = GameInstallState.Verifying;
+        StatusText = "正在获取资源清单...";
+        ProgressPercent = 0;
+        ErrorText = "";
+
+        try
+        {
+            var localVersion = GameStateService.GetLocalVersion(installPath);
+            var branch = await HoYoPlayApiService.GetGameBranchAsync(gameBiz, token);
+            if (branch?.Main == null)
+                throw new InvalidOperationException("无法获取版本信息");
+
+            var audioManifestFields = GetInstalledAudioManifestFields(installPath);
+            var plan = await HoYoPlayApiService.ResolveChunkDownloadPlanAsync(gameBiz, branch.Main, installPath,
+                localVersion?.ToString() ?? "",
+                status => { StatusText = status; Logger.Debug(status, "Verify"); }, token,
+                includeAudioManifests: audioManifestFields.Count > 0,
+                audioManifestFields: audioManifestFields.Count > 0 ? audioManifestFields : null);
+
+            if (plan == null)
+                throw new InvalidOperationException("无法获取资源清单");
+
+            StatusText = $"正在校验 {plan.TotalFiles} 个文件...";
+            await MarkLocalFilesAsync(plan, installPath, token);
+
+            var issues = plan.Files
+                .Where(f => !f.IsFinished)
+                .Select(f => new GameResourceIssue
+                {
+                    RelativePath = f.RelativePath,
+                    Size = f.Size,
+                    MD5 = f.MD5,
+                    ManifestField = f.ManifestField,
+                })
+                .ToList();
+
+            State = GameInstallState.Finished;
+            StatusText = issues.Count == 0 ? "资源校验完成，未发现问题" : $"资源校验完成，发现 {issues.Count} 个异常文件";
+            ProgressPercent = 100;
+            return issues;
+        }
+        catch (OperationCanceledException)
+        {
+            State = GameInstallState.Paused;
+            StatusText = "已暂停";
+            return new List<GameResourceIssue>();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Verify failed: {ex}", "Install");
+            State = GameInstallState.Error;
+            ErrorText = ex.Message;
+            return new List<GameResourceIssue>();
+        }
+    }
+
+    public async Task RepairGameAsync(string gameBiz, string installPath, CancellationToken ct = default)
+    {
+        _cts?.Dispose();
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var token = _cts.Token;
+        State = GameInstallState.Preparing;
+        StatusText = "正在准备资源修复...";
+        ProgressPercent = 0;
+        ErrorText = "";
+
+        try
+        {
+            var localVersion = GameStateService.GetLocalVersion(installPath);
+            var branch = await HoYoPlayApiService.GetGameBranchAsync(gameBiz, token);
+            if (branch?.Main == null) { State = GameInstallState.Error; ErrorText = "无法获取版本信息"; return; }
+
+            var audioManifestFields = GetInstalledAudioManifestFields(installPath);
+            var plan = await HoYoPlayApiService.ResolveChunkDownloadPlanAsync(gameBiz, branch.Main, installPath,
+                localVersion?.ToString() ?? "",
+                status => { StatusText = status; Logger.Debug(status, "Repair"); }, token,
+                includeAudioManifests: audioManifestFields.Count > 0,
+                audioManifestFields: audioManifestFields.Count > 0 ? audioManifestFields : null);
+            if (plan == null || plan.Files.Count == 0) { State = GameInstallState.Error; ErrorText = "无法获取资源清单"; return; }
+
+            State = GameInstallState.Verifying;
+            int matched = await MarkLocalFilesAsync(plan, installPath, token);
+            Logger.Info($"Repair: {matched}/{plan.TotalFiles} files passed verification", "Install");
+
+            var toDownload = plan.Files.Where(f => !f.IsFinished).ToList();
+            if (toDownload.Count == 0)
+            {
+                var sdkVersion = await DownloadGameChannelSdkAsync(gameBiz, installPath, token);
+                SetGameConfigIni(gameBiz, installPath, plan.Version, sdkVersion);
+                State = GameInstallState.Finished;
+                StatusText = "资源完整，无需修复";
+                ProgressPercent = 100;
+                return;
+            }
+
+            long remainingBytes = toDownload.Sum(f => f.Chunks.Sum(c => c.CompressedSize));
+            State = GameInstallState.Downloading;
+            _totalBytes = remainingBytes;
+            _downloadedBytes = 0;
+            StatusText = $"正在修复 {toDownload.Count} 个文件 ({FormatBytes(remainingBytes)})...";
+            StartSpeedTracking();
+
+            int dlDone = 0;
+            await RunParallelWithCancelAsync(toDownload, token, async (file, ct2) =>
+            {
+                var httpClient = _httpClients[Environment.CurrentManagedThreadId % _httpClients.Length];
+                await DownloadChunksToFileAsync(httpClient, file, ct2);
+                file.IsFinished = true;
+                var done = Interlocked.Increment(ref dlDone);
+                ProgressPercent = (double)done / toDownload.Count * 100;
+            });
+
+            if (token.IsCancellationRequested) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); return; }
+
+            StopSpeedTracking();
+            var finalSdkVersion = await DownloadGameChannelSdkAsync(gameBiz, installPath, token);
+            SetGameConfigIni(gameBiz, installPath, plan.Version, finalSdkVersion);
+            CleanupTempFiles(installPath);
+            State = GameInstallState.Finished;
+            StatusText = "资源修复完成";
+            ProgressPercent = 100;
+        }
+        catch (OperationCanceledException) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); }
+        catch (Exception ex) { Logger.Error($"Repair failed: {ex}", "Install"); State = GameInstallState.Error; ErrorText = ex.Message; StopSpeedTracking(); }
     }
 
     public void Pause() { try { _cts?.Cancel(); } catch { } }
@@ -554,6 +674,112 @@ public class GameInstallService : INotifyPropertyChanged
     /// Size check is sufficient - for the same game version, same relative path + same size
     /// means the file content is identical. No need for expensive MD5 computation.
     /// </summary>
+    private async Task<int> HardLinkFilesAsync(ChunkDownloadPlan plan, string hardLinkSourcePath, CancellationToken ct)
+    {
+        PrepareHardLinkTargets(plan, hardLinkSourcePath);
+
+        var toLink = plan.Files
+            .Where(f => !f.IsFinished && !string.IsNullOrWhiteSpace(f.HardLinkTarget))
+            .ToList();
+        if (toLink.Count == 0)
+            return 0;
+
+        var sourceVersion = GameStateService.GetLocalVersion(hardLinkSourcePath)?.ToString();
+        var trustSizeOnly = !string.IsNullOrWhiteSpace(sourceVersion)
+            && string.Equals(sourceVersion, plan.Version, StringComparison.OrdinalIgnoreCase);
+        int linked = 0, done = 0, total = toLink.Count;
+        int degree = Math.Clamp(Environment.ProcessorCount, 4, _maxParallelism);
+
+        Logger.Info($"Hard link prepared: candidates={total}, sourceVersion={sourceVersion}, targetVersion={plan.Version}, trustSizeOnly={trustSizeOnly}", "Install");
+        StatusText = $"正在创建硬链接 ({total})...";
+
+        await Task.Run(() =>
+        {
+            Parallel.ForEach(toLink, new ParallelOptions { MaxDegreeOfParallelism = degree, CancellationToken = ct }, file =>
+            {
+                ct.ThrowIfCancellationRequested();
+                bool verifyMD5 = !trustSizeOnly || NeedsMD5Verification(file.RelativePath);
+                if (TryHardLinkPrepared(file, verifyMD5))
+                    Interlocked.Increment(ref linked);
+
+                var current = Interlocked.Increment(ref done);
+                if (current % 100 == 0 || current == total)
+                {
+                    ProgressPercent = (double)current / total * 100;
+                    StatusText = $"正在创建硬链接 ({current}/{total}, 成功 {Volatile.Read(ref linked)})...";
+                }
+            });
+        }, ct);
+
+        return linked;
+    }
+
+    private void PrepareHardLinkTargets(ChunkDownloadPlan plan, string hardLinkSourcePath)
+    {
+        string? sourceGenshinDataFolder = null;
+        if (new GameBiz(plan.GameBiz).Game == "genshin")
+            sourceGenshinDataFolder = GetExistingGenshinDataFolder(hardLinkSourcePath);
+
+        var targetGenshinDataFolder = GetExpectedGenshinDataFolder(plan.GameBiz);
+        foreach (var file in plan.Files.Where(f => !f.IsFinished))
+        {
+            var rel = file.RelativePath;
+            if (!string.IsNullOrWhiteSpace(sourceGenshinDataFolder) &&
+                !string.IsNullOrWhiteSpace(targetGenshinDataFolder) &&
+                !string.Equals(sourceGenshinDataFolder, targetGenshinDataFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                rel = ReplacePathSegment(rel, targetGenshinDataFolder, sourceGenshinDataFolder);
+            }
+
+            file.HardLinkTarget = ResolveSafeChildPath(hardLinkSourcePath, rel) ?? "";
+        }
+    }
+
+    private static string? GetExpectedGenshinDataFolder(string gameBiz)
+    {
+        if (new GameBiz(gameBiz).Game != "genshin")
+            return null;
+        return new GameBiz(gameBiz).IsGlobalServer() ? "GenshinImpact_Data" : "YuanShen_Data";
+    }
+
+    private static string? GetExistingGenshinDataFolder(string hardLinkSourcePath)
+    {
+        try
+        {
+            foreach (var name in new[] { "YuanShen_Data", "GenshinImpact_Data" })
+            {
+                if (Directory.Exists(Path.Combine(hardLinkSourcePath, name)))
+                    return name;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string ReplacePathSegment(string relativePath, string oldSegment, string newSegment)
+    {
+        if (relativePath.Equals(oldSegment, StringComparison.OrdinalIgnoreCase))
+            return newSegment;
+
+        var prefix = oldSegment + Path.DirectorySeparatorChar;
+        if (relativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return newSegment + relativePath[oldSegment.Length..];
+
+        var altPrefix = oldSegment + Path.AltDirectorySeparatorChar;
+        if (relativePath.StartsWith(altPrefix, StringComparison.OrdinalIgnoreCase))
+            return newSegment + relativePath[oldSegment.Length..];
+
+        return relativePath;
+    }
+
+    private bool TryHardLinkPrepared(ChunkDownloadFile file, bool verifyMD5)
+    {
+        if (file.IsFinished || string.IsNullOrWhiteSpace(file.HardLinkTarget))
+            return false;
+
+        return TryHardLinkMatchSize(file, file.HardLinkTarget, verifyMD5);
+    }
+
     private bool TryHardLinkBySize(ChunkDownloadFile file, string hardLinkSourcePath)
     {
         if (file.IsFinished) return false;
@@ -561,7 +787,7 @@ public class GameInstallService : INotifyPropertyChanged
         // Try exact same relative path
         var target = ResolveSafeChildPath(hardLinkSourcePath, file.RelativePath);
         if (target == null) return false;
-        if (TryHardLinkMatchSize(file, target))
+        if (TryHardLinkMatchSize(file, target, verifyMD5: true))
             return true;
 
         // For Genshin: try YuanShen_Data <-> GenshinImpact_Data swap
@@ -570,27 +796,26 @@ public class GameInstallService : INotifyPropertyChanged
         {
             target = ResolveSafeChildPath(hardLinkSourcePath, rel.Replace("YuanShen_Data", "GenshinImpact_Data"));
             if (target == null) return false;
-            if (TryHardLinkMatchSize(file, target)) return true;
+            if (TryHardLinkMatchSize(file, target, verifyMD5: true)) return true;
         }
         else if (rel.Contains("GenshinImpact_Data"))
         {
             target = ResolveSafeChildPath(hardLinkSourcePath, rel.Replace("GenshinImpact_Data", "YuanShen_Data"));
             if (target == null) return false;
-            if (TryHardLinkMatchSize(file, target)) return true;
+            if (TryHardLinkMatchSize(file, target, verifyMD5: true)) return true;
         }
 
         return false;
     }
 
-    private bool TryHardLinkMatchSize(ChunkDownloadFile file, string sourcePath)
+    private bool TryHardLinkMatchSize(ChunkDownloadFile file, string sourcePath, bool verifyMD5)
     {
         if (!File.Exists(sourcePath)) return false;
         var sourceLen = new FileInfo(sourcePath).Length;
         if (sourceLen != file.Size) return false;
         try
         {
-            // Verify MD5 if available (following Starward pattern)
-            if (!string.IsNullOrEmpty(file.MD5))
+            if (verifyMD5 && !string.IsNullOrEmpty(file.MD5))
             {
                 if (!VerifyFileMD5(sourcePath, file.MD5))
                     return false;
@@ -960,7 +1185,8 @@ public class GameInstallService : INotifyPropertyChanged
 
         State = GameInstallState.Extracting; StatusText = "正在解压...";
         var (ver, _) = await HoYoPlayApiService.GetLatestVersionsAsync(gameBiz, ct);
-        SetGameConfigIni(gameBiz, installPath, ver);
+        var sdkVersion = await DownloadGameChannelSdkAsync(gameBiz, installPath, ct);
+        SetGameConfigIni(gameBiz, installPath, ver, sdkVersion);
         CleanupTempFiles(installPath);
         State = GameInstallState.Finished; StatusText = "安装完成"; ProgressPercent = 100; StopSpeedTracking();
     }
@@ -987,6 +1213,87 @@ public class GameInstallService : INotifyPropertyChanged
             throw new IOException($"MD5 mismatch: {Path.GetFileName(dest)}");
         }
         File.Move(tmp, dest, true);
+    }
+
+    private async Task<string?> DownloadGameChannelSdkAsync(string gameBiz, string installPath, CancellationToken ct)
+    {
+        try
+        {
+            var channelSdk = await HoYoPlayApiService.GetGameChannelSDKAsync(gameBiz, ct);
+            if (channelSdk?.ChannelSDKPackage?.Url == null)
+                return null;
+
+            if (string.Equals(ReadConfigValue(installPath, "sdk_version"), channelSdk.Version, StringComparison.OrdinalIgnoreCase))
+                return channelSdk.Version;
+
+            StatusText = "正在下载渠道 SDK...";
+            var fileName = Path.GetFileName(new Uri(channelSdk.ChannelSDKPackage.Url).AbsolutePath);
+            if (string.IsNullOrWhiteSpace(fileName))
+                fileName = "channel_sdk_pkg.zip";
+            var packagePath = Path.Combine(installPath, fileName);
+
+            await DownloadFileSimpleAsync(_httpClients[0], channelSdk.ChannelSDKPackage.Url, packagePath,
+                channelSdk.ChannelSDKPackage.Size, channelSdk.ChannelSDKPackage.MD5, ct);
+
+            StatusText = "正在解压渠道 SDK...";
+            ExtractZipPackageSafe(packagePath, installPath);
+            TryDeleteFile(packagePath);
+            Logger.Info($"Channel SDK installed: {gameBiz} {channelSdk.Version}", "Install");
+            return channelSdk.Version;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            Logger.Warn($"DownloadGameChannelSdk failed: {ex.Message}", "Install");
+            return null;
+        }
+    }
+
+    private static string? ReadConfigValue(string installPath, string key)
+    {
+        try
+        {
+            var path = Path.Combine(installPath, "config.ini");
+            if (!File.Exists(path)) return null;
+            foreach (var line in File.ReadLines(path))
+            {
+                var i = line.IndexOf('=');
+                if (i <= 0) continue;
+                if (string.Equals(line[..i].Trim(), key, StringComparison.OrdinalIgnoreCase))
+                    return line[(i + 1)..].Trim();
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static void ExtractZipPackageSafe(string packagePath, string installPath)
+    {
+        using var archive = ZipFile.OpenRead(packagePath);
+        var root = Path.GetFullPath(installPath);
+        if (!root.EndsWith(Path.DirectorySeparatorChar))
+            root += Path.DirectorySeparatorChar;
+
+        foreach (var entry in archive.Entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.FullName))
+                continue;
+
+            var fullPath = Path.GetFullPath(Path.Combine(root, entry.FullName));
+            if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new IOException($"Unsafe path in channel SDK package: {entry.FullName}");
+
+            if (string.IsNullOrEmpty(entry.Name))
+            {
+                Directory.CreateDirectory(fullPath);
+                continue;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            var tempPath = fullPath + ".tmp";
+            entry.ExtractToFile(tempPath, true);
+            File.Move(tempPath, fullPath, true);
+        }
     }
 
     // ================================================
@@ -1059,7 +1366,7 @@ public class GameInstallService : INotifyPropertyChanged
         catch { return null; }
     }
 
-    private void SetGameConfigIni(string gameBiz, string installPath, string? version)
+    private void SetGameConfigIni(string gameBiz, string installPath, string? version, string? sdkVersion = null)
     {
         try
         {
@@ -1069,10 +1376,12 @@ public class GameInstallService : INotifyPropertyChanged
                 foreach (var line in File.ReadAllLines(cp))
                 { if (line.StartsWith("[") || string.IsNullOrWhiteSpace(line)) continue; var i = line.IndexOf('='); if (i > 0) d[line[..i].Trim()] = line[(i + 1)..].Trim(); }
             d["game_version"] = version ?? "";
+            d.Remove("predownload");
             var srv = new GameBiz(gameBiz).Server;
             if (srv == "cn") { d["channel"] = "1"; d["sub_channel"] = "1"; d["cps"] = "mihoyo"; }
             else if (srv == "global") { d["channel"] = "1"; d["sub_channel"] = "0"; d["cps"] = "hoyoverse"; }
             else if (srv == "bilibili") { d["channel"] = "14"; d["sub_channel"] = "0"; d["cps"] = "bilibili"; }
+            d["sdk_version"] = sdkVersion ?? d.GetValueOrDefault("sdk_version", "");
             d["game_biz"] = HoYoPlayGameMap.ToHoYoPlayBiz(gameBiz);
             var sb = new StringBuilder(); sb.AppendLine("[General]");
             foreach (var kv in d) sb.AppendLine($"{kv.Key}={kv.Value}");
@@ -1081,9 +1390,23 @@ public class GameInstallService : INotifyPropertyChanged
         catch (Exception ex) { Logger.Warn($"SetGameConfigIni: {ex.Message}", "Install"); }
     }
 
-    private void MarkPredownload(string gameBiz, string ip, string? local, string? pre)
+    private void MarkPredownload(string gameBiz, string ip, string? local, string? pre, IReadOnlyCollection<string>? audioManifestFields)
     {
-        try { var p = Path.Combine(ip, "config.ini"); if (File.Exists(p)) { var c = File.ReadAllText(p); c = Regex.Replace(c, @"predownload=.*", ""); c += $"\npredownload={local},{pre},\n"; File.WriteAllText(p, c); } } catch { }
+        try
+        {
+            var p = Path.Combine(ip, "config.ini");
+            if (!File.Exists(p)) return;
+
+            var c = File.ReadAllText(p);
+            c = Regex.Replace(c, @"(?m)^\s*predownload\s*=.*\r?\n?", "");
+            var audio = audioManifestFields is { Count: > 0 } ? string.Join("|", audioManifestFields.OrderBy(x => x)) : "";
+            c = c.TrimEnd() + $"\r\npredownload={local},{pre},{audio}\r\n";
+            File.WriteAllText(p, c);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"MarkPredownload: {ex.Message}", "Install");
+        }
     }
 
     private void CleanupTempFiles(string ip) { try { foreach (var f in Directory.GetFiles(ip, "*_tmp", SearchOption.AllDirectories)) TryDeleteFile(f); } catch { } }
@@ -1229,17 +1552,17 @@ public class GameInstallService : INotifyPropertyChanged
     {
         var result = new List<AudioPackInfo>();
         var knownPacks = new[] {
-            ("zh-cn", "Chinese (zh-cn)", new[] { "Chinese(PRC)", "Chinese", "zh-cn" }),
-            ("en-us", "English (en-us)", new[] { "English(US)", "English", "en-us" }),
-            ("ja-jp", "Japanese (ja-jp)", new[] { "Japanese", "ja-jp" }),
-            ("ko-kr", "Korean (ko-kr)", new[] { "Korean", "ko-kr" }),
+            new AudioPackDefinition("zh-cn", "Chinese (zh-cn)", "Chinese", "Audio_Chinese_pkg_version", new[] { "Chinese(PRC)", "Chinese", "zh-cn" }),
+            new AudioPackDefinition("en-us", "English (en-us)", "English(US)", "Audio_English(US)_pkg_version", new[] { "English(US)", "English", "en-us" }),
+            new AudioPackDefinition("ja-jp", "Japanese (ja-jp)", "Japanese", "Audio_Japanese_pkg_version", new[] { "Japanese", "ja-jp" }),
+            new AudioPackDefinition("ko-kr", "Korean (ko-kr)", "Korean", "Audio_Korean_pkg_version", new[] { "Korean", "ko-kr" }),
         };
 
         var dataDirs = GetAudioScanDataDirs(installPath, profile, biz).ToList();
-        foreach (var (field, displayName, markers) in knownPacks)
+        foreach (var pack in knownPacks)
         {
-            bool installed = IsAudioPackInstalled(installPath, dataDirs, markers);
-            result.Add(new AudioPackInfo { Field = field, DisplayName = displayName, IsInstalled = installed });
+            bool installed = IsAudioPackInstalled(installPath, dataDirs, pack);
+            result.Add(new AudioPackInfo { Field = pack.Field, DisplayName = pack.DisplayName, IsInstalled = installed });
         }
         return result;
     }
@@ -1260,10 +1583,23 @@ public class GameInstallService : INotifyPropertyChanged
         }
     }
 
-    private static bool IsAudioPackInstalled(string installPath, List<string> dataDirs, string[] markers)
+    private sealed record AudioPackDefinition(
+        string Field,
+        string DisplayName,
+        string ScanMarker,
+        string PackageVersionFileName,
+        string[] FileMarkers);
+
+    private static bool IsAudioPackInstalled(string installPath, List<string> dataDirs, AudioPackDefinition pack)
     {
+        if (HasExpectedPackageVersionFile(installPath, pack.PackageVersionFileName))
+            return true;
+
         foreach (var dataDir in dataDirs)
         {
+            if (HasExpectedPackageVersionFile(dataDir, pack.PackageVersionFileName))
+                return true;
+
             var streamingAssets = Path.Combine(dataDir, "StreamingAssets");
             var audioRoots = new[]
             {
@@ -1271,19 +1607,17 @@ public class GameInstallService : INotifyPropertyChanged
                 Path.Combine(streamingAssets, "Audio"),
                 Path.Combine(streamingAssets, "Audio", "Windows"),
                 Path.Combine(streamingAssets, "Audio", "GeneratedSoundBanks", "Windows"),
+                Path.Combine(streamingAssets, "Audio", "AudioPackage", "Windows", "DecodedBanks"),
             };
 
             foreach (var root in audioRoots.Where(Directory.Exists))
             {
-                if (HasMarkedDirectoryWithFiles(root, markers) || HasMarkedAudioFile(root, markers))
+                if (HasMarkedDirectoryWithFiles(root, pack.FileMarkers) || HasMarkedAudioFile(root, pack.FileMarkers))
                     return true;
             }
-
-            if (HasMarkedPackageVersion(dataDir, markers))
-                return true;
         }
 
-        return HasMarkedPackageVersion(installPath, markers);
+        return HasAudioLanguageStateFile(installPath, pack.ScanMarker);
     }
 
     private static bool HasMarkedDirectoryWithFiles(string root, string[] markers)
@@ -1307,7 +1641,10 @@ public class GameInstallService : INotifyPropertyChanged
         {
             foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Take(12000))
             {
-                if (ContainsAny(file, markers))
+                var fileName = Path.GetFileName(file);
+                if (fileName.Contains("pkg_version", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (ContainsAny(fileName, markers))
                     return true;
             }
         }
@@ -1315,20 +1652,37 @@ public class GameInstallService : INotifyPropertyChanged
         return false;
     }
 
-    private static bool HasMarkedPackageVersion(string root, string[] markers)
+    private static bool HasExpectedPackageVersionFile(string root, string packageVersionFileName)
     {
         try
         {
-            foreach (var file in Directory.EnumerateFiles(root, "*pkg_version*", SearchOption.AllDirectories).Take(256))
+            if (!Directory.Exists(root))
+                return false;
+
+            foreach (var file in Directory.EnumerateFiles(root, packageVersionFileName, SearchOption.AllDirectories).Take(8))
             {
-                if (ContainsAny(Path.GetFileName(file), markers))
-                    return true;
-                try
+                if (Path.GetFileName(file).Equals(packageVersionFileName, StringComparison.OrdinalIgnoreCase)
+                    && new FileInfo(file).Length > 0)
                 {
-                    if (ContainsAny(File.ReadAllText(file), markers))
-                        return true;
+                    return true;
                 }
-                catch { }
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private static bool HasAudioLanguageStateFile(string installPath, string scanMarker)
+    {
+        try
+        {
+            if (!Directory.Exists(installPath))
+                return false;
+
+            foreach (var file in Directory.EnumerateFiles(installPath, "*Audio*Language*", SearchOption.AllDirectories).Take(16))
+            {
+                if (File.ReadLines(file).Any(line => line.Contains(scanMarker, StringComparison.OrdinalIgnoreCase)))
+                    return true;
             }
         }
         catch { }
@@ -1356,4 +1710,12 @@ public class AudioPackInfo
     public bool IsInstalled { get; set; }
     public string ButtonText => IsInstalled ? "已安装" : "安装";
     public bool CanInstall => !IsInstalled;
+}
+
+public class GameResourceIssue
+{
+    public string RelativePath { get; set; } = "";
+    public long Size { get; set; }
+    public string MD5 { get; set; } = "";
+    public string ManifestField { get; set; } = "";
 }

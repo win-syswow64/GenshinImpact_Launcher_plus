@@ -4,6 +4,9 @@
     {
         public string Name { get; set; }
         public string Port { get; set; }
+        public string GameBiz { get; set; }
+        public string Uid { get; set; }
+        public string SavedAt { get; set; }
         public string MIHOYOSDK_ADL_PROD { get; set; }
         public string GENERAL_DATA { get; set; }
     }

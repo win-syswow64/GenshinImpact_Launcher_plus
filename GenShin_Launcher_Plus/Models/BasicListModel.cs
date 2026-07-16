@@ -3,6 +3,12 @@
     public class UserListModel
     {
         public string UserName { get; set; }
+        public string DisplayName { get; set; }
+        public string GameBiz { get; set; }
+        public string Port { get; set; }
+        public string Uid { get; set; }
+        public string SavedAt { get; set; }
+        public bool IsCurrent { get; set; }
     }
     public class DisplaySizeListModel
     {

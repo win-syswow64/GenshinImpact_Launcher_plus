@@ -25,6 +25,11 @@ namespace GenShin_Launcher_Plus.Views
             }
         }
 
+        public void RefreshForActiveGame()
+        {
+            ViewModel.RefreshForActiveGame();
+        }
+
         private void AccentColor_Click(object sender, MouseButtonEventArgs e)
         {
             if (sender is FrameworkElement fe && fe.Tag is string hex)

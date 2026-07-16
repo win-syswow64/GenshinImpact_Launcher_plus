@@ -92,7 +92,9 @@ public static class GameStateService
             }
             else if (info.PreDownloadVersion != null)
             {
-                info.State = GameState.PreDownloadAvailable;
+                info.State = IsPreDownloadFinished(installPath, info.LocalVersion?.ToString(), info.PreDownloadVersion)
+                    ? GameState.Ready
+                    : GameState.PreDownloadAvailable;
             }
             else
             {
@@ -101,7 +103,9 @@ public static class GameStateService
         }
         else if (info.PreDownloadVersion != null)
         {
-            info.State = GameState.PreDownloadAvailable;
+            info.State = IsPreDownloadFinished(installPath, info.LocalVersion?.ToString(), info.PreDownloadVersion)
+                ? GameState.Ready
+                : GameState.PreDownloadAvailable;
         }
         else
         {
@@ -110,6 +114,38 @@ public static class GameStateService
 
         Logger.Debug($"GameState: {gameBiz} state={info.State} local={info.LocalVersion} latest={info.LatestVersion} predownload={info.PreDownloadVersion}", "GameState");
         return info;
+    }
+
+    public static bool IsPreDownloadFinished(string installPath, string? localVersion, string? preDownloadVersion)
+    {
+        if (string.IsNullOrWhiteSpace(installPath) || string.IsNullOrWhiteSpace(preDownloadVersion))
+            return false;
+
+        try
+        {
+            var configPath = Path.Combine(installPath, "config.ini");
+            if (!File.Exists(configPath))
+                return false;
+
+            var content = File.ReadAllText(configPath);
+            var match = Regex.Match(content, @"(?m)^\s*predownload\s*=\s*(.+?)\s*$");
+            if (!match.Success)
+                return false;
+
+            var parts = match.Groups[1].Value.Split(',');
+            if (parts.Length < 2)
+                return false;
+
+            var markedLocal = parts[0].Trim();
+            var markedPre = parts[1].Trim();
+            return string.Equals(markedPre, preDownloadVersion, StringComparison.OrdinalIgnoreCase)
+                && (string.IsNullOrWhiteSpace(localVersion) || string.Equals(markedLocal, localVersion, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"IsPreDownloadFinished failed: {ex.Message}", "GameState");
+            return false;
+        }
     }
 }
 

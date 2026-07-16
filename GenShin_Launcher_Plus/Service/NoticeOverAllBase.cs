@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using GenShin_Launcher_Plus.Models;
@@ -53,7 +54,10 @@ namespace GenShin_Launcher_Plus.Service
                 SetProperty(ref _switchUserValue, value);
                 if (!string.IsNullOrEmpty(SwitchUserValue))
                 {
-                    SwitchUser = $"{App.Current.Language.UserNameLab} : {SwitchUserValue}";
+                    var account = UserLists.FirstOrDefault(x => x.UserName == SwitchUserValue);
+                    if (account == null || !string.Equals(account.GameBiz, App.Current.DataModel.ActiveGameBiz, System.StringComparison.OrdinalIgnoreCase))
+                        return;
+                    SwitchUser = $"{App.Current.Language.UserNameLab} : {account.DisplayName}";
                     App.Current.DataModel.SwitchUser = SwitchUserValue;
                     App.Current.DataModel.SaveDataToFile();
                     new RegistryService().SetToRegistry(SwitchUserValue);

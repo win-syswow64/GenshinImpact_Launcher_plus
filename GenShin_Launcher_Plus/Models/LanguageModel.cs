@@ -421,6 +421,8 @@ namespace GenShin_Launcher_Plus.Models
         public string ConvertTargetHeader { get => _convertTargetHeader; set => SetField(ref _convertTargetHeader, value); }
         private string _accountManageTab;
         public string AccountManageTab { get => _accountManageTab; set => SetField(ref _accountManageTab, value); }
+        private string _switchAccountButton;
+        public string SwitchAccountButton { get => _switchAccountButton; set => SetField(ref _switchAccountButton, value); }
         private string _themeSettingsTab;
         public string ThemeSettingsTab { get => _themeSettingsTab; set => SetField(ref _themeSettingsTab, value); }
         private string _languageSettingsTab;

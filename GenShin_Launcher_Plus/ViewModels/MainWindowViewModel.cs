@@ -449,6 +449,8 @@ namespace GenShin_Launcher_Plus.ViewModels
             OnPropertyChanged(nameof(InstallStatusTitle));
             SwitchPort = $"{languages.GameClientStr} : {CurrentServerDisplay}";
             App.Current.NoticeOverAllBase.SwitchPort = SwitchPort;
+            if (CurrentPage is SettingPage settingPage)
+                settingPage.RefreshForActiveGame();
             if (reloadBackground)
                 _ = ReloadBackgroundAsync();
             _ = RefreshGameStateAsync();

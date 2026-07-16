@@ -92,12 +92,8 @@ namespace GenShin_Launcher_Plus.Service
 
         public void ReadUserList()
         {
-            App.Current.NoticeOverAllBase.UserLists = new List<UserListModel>();
-            if (!Directory.Exists("UserData")) return;
-            foreach (var file in new DirectoryInfo("UserData").GetFiles())
-            {
-                App.Current.NoticeOverAllBase.UserLists.Add(new UserListModel { UserName = file.Name });
-            }
+            App.Current.NoticeOverAllBase.UserLists = new UserDataService().ReadUserList()
+                .FindAll(x => string.Equals(x.GameBiz, App.Current.DataModel.ActiveGameBiz, System.StringComparison.OrdinalIgnoreCase));
         }
     }
 }

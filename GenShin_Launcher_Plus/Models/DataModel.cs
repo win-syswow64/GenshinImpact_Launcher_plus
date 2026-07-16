@@ -220,8 +220,16 @@ namespace GenShin_Launcher_Plus.Core
         private string _SwitchUser;
         public string SwitchUser
         {
-            get { _SwitchUser = parser.GetSetting("setup", "SwitchUser", 0); return _SwitchUser; }
-            set { _SwitchUser = value; parser.AddSetting("setup", "SwitchUser", _SwitchUser); }
+            get
+            {
+                _SwitchUser = parser.GetSetting(ActiveGameBiz, "SwitchUser", 0);
+                return _SwitchUser;
+            }
+            set
+            {
+                _SwitchUser = value;
+                parser.AddSetting(ActiveGameBiz, "SwitchUser", _SwitchUser);
+            }
         }
 
         private bool _IsPopup;

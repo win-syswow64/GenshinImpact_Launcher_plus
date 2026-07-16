@@ -72,6 +72,9 @@ public class GamePackageResourceInfo
 
 public class GamePackageFileInfo
 {
+    [JsonPropertyName("language")]
+    public string Language { get; set; }
+
     [JsonPropertyName("url")]
     public string Url { get; set; }
 
@@ -123,6 +126,18 @@ public class GameBranchPackageInfo
 
     [JsonPropertyName("diff_tags")]
     public List<string> DiffTags { get; set; }
+
+    [JsonPropertyName("categories")]
+    public List<GameBranchPackageCategory> Categories { get; set; }
+}
+
+public class GameBranchPackageCategory
+{
+    [JsonPropertyName("category_id")]
+    public string CategoryId { get; set; }
+
+    [JsonPropertyName("matching_field")]
+    public string MatchingField { get; set; }
 }
 
 // === Game Config ===
