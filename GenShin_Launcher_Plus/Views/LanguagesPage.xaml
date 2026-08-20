@@ -4,21 +4,28 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              mc:Ignorable="d">
-    <Border Style="{StaticResource CardBorder}" Width="340" Padding="24"
-            VerticalAlignment="Center" HorizontalAlignment="Center">
-        <StackPanel>
-            <TextBlock Text="{Binding languages.LanguageSetTitle}"
-                       Style="{StaticResource SubtitleText}" Margin="0,0,0,20"/>
-            <ComboBox Style="{StaticResource DarkComboBox}" ItemsSource="{Binding langlist}"
-                      DisplayMemberPath="LangName" SelectedValue="{Binding SwitchLang, Mode=OneWayToSource}"
-                      SelectedValuePath="LangFileName" SelectedIndex="{Binding LangIndex, Mode=OneWay}"
-                      Margin="0,0,0,20"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="{Binding languages.Cancel}" Style="{StaticResource SecondaryButton}"
-                        Click="RemoveThisPage" Margin="0,0,8,0"/>
-                <Button Content="{Binding languages.SaveBtn}" Style="{StaticResource PrimaryButton}"
-                        Command="{Binding SaveLangSetCommand}"/>
-            </StackPanel>
-        </StackPanel>
-    </Border>
+    <Grid Margin="36">
+        <Border Style="{StaticResource SubPageSurface}" Width="420" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <StackPanel Grid.Row="0" Margin="0,0,0,24">
+                    <Border Width="44" Height="44" Background="#2AFFFFFF" CornerRadius="12" HorizontalAlignment="Left">
+                        <TextBlock Text="&#xE774;" FontFamily="{StaticResource IconFont}" FontSize="20" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="{Binding languages.LanguageSetTitle}" Style="{StaticResource SubtitleText}" Margin="0,14,0,4"/>
+                    <TextBlock Text="选择界面语言，保存后会立即应用到启动器。" Style="{StaticResource CaptionText}"/>
+                </StackPanel>
+                <StackPanel Grid.Row="1">
+                    <TextBlock Text="显示语言" Foreground="#CFFFFFFF" FontSize="12" Margin="0,0,0,7"/>
+                    <ComboBox Style="{StaticResource DarkComboBox}" ItemsSource="{Binding langlist}"
+                              DisplayMemberPath="LangName" SelectedValue="{Binding SwitchLang, Mode=OneWayToSource}"
+                              SelectedValuePath="LangFileName" SelectedIndex="{Binding LangIndex, Mode=OneWay}"/>
+                </StackPanel>
+                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,26,0,0">
+                    <Button Content="{Binding languages.Cancel}" Style="{StaticResource SecondaryButton}" Click="RemoveThisPage" Margin="0,0,8,0"/>
+                    <Button Content="{Binding languages.SaveBtn}" Style="{StaticResource PrimaryButton}" Command="{Binding SaveLangSetCommand}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
 </UserControl>

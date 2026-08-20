@@ -126,6 +126,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             RepairGameCommand = new AsyncRelayCommand(RepairGameAsync);
             OpenGameNewsCommand = new RelayCommand<GameNewsItem>(OpenGameNews);
             OpenGameBannerCommand = new RelayCommand(OpenGameBanner);
+            PreviousGameBannerCommand = new RelayCommand(PreviousGameBanner);
             NextGameBannerCommand = new RelayCommand(NextGameBanner);
             SelectGameNewsCategoryCommand = new RelayCommand<string>(SelectGameNewsCategory);
             languages.PropertyChanged += (_, _) =>
@@ -475,6 +476,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         public ICommand ToggleSidebarCommand { get; }
         public ICommand OpenGameNewsCommand { get; }
         public ICommand OpenGameBannerCommand { get; }
+        public ICommand PreviousGameBannerCommand { get; }
         public ICommand NextGameBannerCommand { get; }
         public ICommand SelectGameNewsCategoryCommand { get; }
 
@@ -769,6 +771,14 @@ namespace GenShin_Launcher_Plus.ViewModels
         {
             if (GameBanners.Count < 2) return;
             _currentGameBannerIndex = (_currentGameBannerIndex + 1) % GameBanners.Count;
+            OnPropertyChanged(nameof(CurrentGameBanner));
+            OnPropertyChanged(nameof(GameBannerPosition));
+        }
+
+        private void PreviousGameBanner()
+        {
+            if (GameBanners.Count < 2) return;
+            _currentGameBannerIndex = (_currentGameBannerIndex - 1 + GameBanners.Count) % GameBanners.Count;
             OnPropertyChanged(nameof(CurrentGameBanner));
             OnPropertyChanged(nameof(GameBannerPosition));
         }

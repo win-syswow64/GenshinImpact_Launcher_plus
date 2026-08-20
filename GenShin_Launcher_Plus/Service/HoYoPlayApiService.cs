@@ -89,14 +89,21 @@ public static class HoYoPlayApiService
     /// </summary>
     public static async Task<GameLauncherContent> GetGameLauncherContentAsync(string gameBiz, CancellationToken ct = default)
     {
-        if (_gameContentCache.TryGetValue(gameBiz, out var cached) && DateTimeOffset.UtcNow - cached.CachedAt < TimeSpan.FromMinutes(5))
+        // HoYoPlay does not return launcher content for the Bilibili channel.
+        // The game news is shared with the Chinese official server, so use that
+        // official identifier for both retrieval and cache lookup.
+        var contentGameBiz = gameBiz.EndsWith("_bilibili", StringComparison.OrdinalIgnoreCase)
+            ? $"{gameBiz[..^"_bilibili".Length]}_cn"
+            : gameBiz;
+
+        if (_gameContentCache.TryGetValue(contentGameBiz, out var cached) && DateTimeOffset.UtcNow - cached.CachedAt < TimeSpan.FromMinutes(5))
             return cached.Content;
 
         try
         {
-            var launcherId = HoYoPlayGameMap.GetLauncherId(gameBiz);
-            var gameId = HoYoPlayGameMap.GetApiGameId(gameBiz);
-            var baseUrl = HoYoPlayGameMap.GetApiBaseUrl(gameBiz);
+            var launcherId = HoYoPlayGameMap.GetLauncherId(contentGameBiz);
+            var gameId = HoYoPlayGameMap.GetApiGameId(contentGameBiz);
+            var baseUrl = HoYoPlayGameMap.GetApiBaseUrl(contentGameBiz);
             if (string.IsNullOrWhiteSpace(launcherId) || string.IsNullOrWhiteSpace(gameId))
                 return new GameLauncherContent();
 
@@ -129,7 +136,7 @@ public static class HoYoPlayApiService
                 .ToList();
 
             var result = new GameLauncherContent { Banners = banners, News = items };
-            _gameContentCache[gameBiz] = (DateTimeOffset.UtcNow, result);
+            _gameContentCache[contentGameBiz] = (DateTimeOffset.UtcNow, result);
             return result;
         }
         catch (Exception ex)

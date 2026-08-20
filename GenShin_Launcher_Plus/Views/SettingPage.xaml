@@ -6,8 +6,9 @@
              mc:Ignorable="d">
     <Grid>
         <!-- Top bar -->
-        <Grid Height="48" VerticalAlignment="Top" Background="{StaticResource TopBarBrush}">
-            <StackPanel Orientation="Horizontal" Margin="12,0">
+        <Border Height="64" VerticalAlignment="Top" Style="{StaticResource SubPageHeader}">
+            <Grid>
+            <StackPanel Orientation="Horizontal">
                 <Button Style="{StaticResource IconButton}" Width="36" Height="36"
                         Content="&#xE72B;" Foreground="#B0FFFFFF"
                         Command="{Binding ThisPageRemoveCommand}" ToolTip="{Binding languages.BackToolTip}"
@@ -51,10 +52,11 @@
                         Margin="16,6,0,6" Padding="20,0" Height="32"
                         VerticalAlignment="Center"/>
             </StackPanel>
-        </Grid>
+            </Grid>
+        </Border>
 
         <!-- Tab Content -->
-        <Grid Margin="0,48,0,0" IsEnabled="{Binding IsPageEnabled}">
+        <Grid Margin="20,80,20,20" IsEnabled="{Binding IsPageEnabled}" Background="#2418222F" ClipToBounds="True">
             <TabControl SelectedIndex="{Binding FlipViewSelectedIndex}"
                         BorderThickness="0" Background="Transparent" Padding="0">
                 <TabControl.Template>
@@ -97,6 +99,29 @@
                                         ToolTip="{Binding languages.GameDirectoryHeader}"
                                         Margin="8,0,0,0"/>
                             </Grid>
+
+                            <!-- Game health actions intentionally live with the installation path, not on the dashboard. -->
+                            <TextBlock Style="{StaticResource SectionHeaderText}" Text="游戏维护" Margin="0,20,0,8"/>
+                            <Border Style="{StaticResource SettingsSectionCard}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="校验与修复游戏资源" Foreground="White" FontWeight="SemiBold" FontSize="13"/>
+                                        <TextBlock Text="检查已安装文件；发现问题后可重新下载缺失或损坏的资源。" Foreground="#9DFFFFFF" FontSize="11.5" Margin="0,5,12,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource SecondaryButton}" Content="校验游戏" Margin="0,0,8,0"
+                                                Command="{Binding DataContext.VerifyGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                IsEnabled="{Binding DataContext.CanVerifyGame, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        <Button Style="{StaticResource PrimaryButton}" Content="修复游戏"
+                                                Command="{Binding DataContext.RepairGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                IsEnabled="{Binding DataContext.CanRepairGame, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
 
                             <!-- Audio Language Packs -->
                             <TextBlock Style="{StaticResource SectionHeaderText}" Text="音频语言包" Margin="0,16,0,0"/>

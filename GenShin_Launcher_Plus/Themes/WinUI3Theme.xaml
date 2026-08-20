@@ -612,6 +612,31 @@
         <Setter Property="Padding" Value="16"/>
     </Style>
 
+    <!-- Shared secondary-page language: a restrained dark glass surface with a clear hierarchy. -->
+    <Style x:Key="SubPageSurface" TargetType="Border" BasedOn="{StaticResource CardBorder}">
+        <Setter Property="Background" Value="#B818222F"/>
+        <Setter Property="BorderBrush" Value="#36FFFFFF"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="16"/>
+        <Setter Property="Padding" Value="28"/>
+    </Style>
+
+    <Style x:Key="SubPageHeader" TargetType="Border">
+        <Setter Property="Background" Value="#82101824"/>
+        <Setter Property="BorderBrush" Value="#2FFFFFFF"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        <Setter Property="Padding" Value="24,14"/>
+    </Style>
+
+    <Style x:Key="SettingsSectionCard" TargetType="Border">
+        <Setter Property="Background" Value="#401A2430"/>
+        <Setter Property="BorderBrush" Value="#2BFFFFFF"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="16"/>
+        <Setter Property="Margin" Value="0,0,0,16"/>
+    </Style>
+
     <!-- ===== TextBlock Styles ===== -->
     <Style x:Key="TitleText" TargetType="TextBlock">
         <Setter Property="FontSize" Value="28"/>

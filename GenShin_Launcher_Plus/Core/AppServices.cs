@@ -58,8 +58,7 @@ namespace GenShin_Launcher_Plus.Core
 
         public HomePageViewModel CreateHomePageViewModel() => new(
             GetRequiredService<ILaunchService>(),
-            GetRequiredService<ILauncherSession>(),
-            CreateGameInstallService);
+            GetRequiredService<ILauncherSession>());
 
         public UsersPageViewModel CreateUsersPageViewModel() => new(
             GetRequiredService<IRegistryService>(),

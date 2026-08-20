@@ -49,6 +49,18 @@
 
                 <!-- Compact navigation, based on Starward's left-compact navigation mode. -->
                 <Border x:Name="Sidebar" Grid.Column="0" Background="#DC101721" BorderBrush="#22FFFFFF" BorderThickness="0,0,1,0">
+                    <Border.Resources>
+                        <Style x:Key="SidebarNavigationButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+                            <Setter Property="Width" Value="{Binding SidebarButtonWidth}"/>
+                            <Setter Property="Height" Value="54"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSidebarExpanded}" Value="True">
+                                    <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Resources>
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="70"/>
@@ -56,26 +68,33 @@
                             <RowDefinition Height="64"/>
                         </Grid.RowDefinitions>
                         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="8,0" VerticalAlignment="Center">
-                            <Button Style="{StaticResource IconButton}" Width="54" Height="54" Command="{Binding ToggleSidebarCommand}" ToolTip="展开或收起导航" Content="&#xE700;" FontSize="25"/>
-                            <StackPanel Margin="8,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding Title}" Foreground="White" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock Text="{Binding ProgramVersionText}" Foreground="#9DFFFFFF" FontSize="10" Margin="0,2,0,0"/>
-                            </StackPanel>
+                            <Button Width="54" Height="54" Command="{Binding ToggleSidebarCommand}" ToolTip="展开或收起导航" FontSize="25">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource IconButton}">
+                                        <Setter Property="Content" Value="&#xE700;"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsSidebarExpanded}" Value="True">
+                                                <Setter Property="Content" Value="&#xE76B;"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
                         </StackPanel>
                         <StackPanel Grid.Row="1" Margin="8,4" VerticalAlignment="Top">
-                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Margin="0,0,0,9" Command="{Binding NavigateHomeCommand}" ToolTip="主页">
+                            <Button Style="{StaticResource SidebarNavigationButton}" Margin="0,0,0,9" Command="{Binding NavigateHomeCommand}" ToolTip="主页">
                                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="主页" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
                             </Button>
-                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Margin="0,0,0,9" Command="{Binding NavigateUsersCommand}" ToolTip="{Binding languages.AccountManageTab}">
+                            <Button Style="{StaticResource SidebarNavigationButton}" Margin="0,0,0,9" Command="{Binding NavigateUsersCommand}" ToolTip="{Binding languages.AccountManageTab}">
                                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE77B;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="账号管理" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
                             </Button>
-                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Margin="0,0,0,9" Command="{Binding OpenImagesDirectoryCommand}" ToolTip="{Binding languages.NavScreenshotsToolTip}" Visibility="{Binding NavScreenshotsVisible}">
+                            <Button Style="{StaticResource SidebarNavigationButton}" Margin="0,0,0,9" Command="{Binding OpenImagesDirectoryCommand}" ToolTip="{Binding languages.NavScreenshotsToolTip}" Visibility="{Binding NavScreenshotsVisible}">
                                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B9;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="截图" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
                             </Button>
-                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Margin="0,0,0,9" Command="{Binding OpenQQGroupUrlCommand}" ToolTip="{Binding languages.NavQQGroupText}" Visibility="{Binding NavQQGroupVisible}">
+                            <Button Style="{StaticResource SidebarNavigationButton}" Margin="0,0,0,9" Command="{Binding OpenQQGroupUrlCommand}" ToolTip="{Binding languages.NavQQGroupText}" Visibility="{Binding NavQQGroupVisible}">
                                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B8;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="社区" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
                             </Button>
-                            <Button Style="{StaticResource IconButton}" Width="{Binding SidebarButtonWidth}" Height="54" HorizontalContentAlignment="Left" Command="{Binding OpenAboutCommand}" ToolTip="{Binding languages.NavAboutText}" Visibility="{Binding NavAboutVisible}">
+                            <Button Style="{StaticResource SidebarNavigationButton}" Command="{Binding OpenAboutCommand}" ToolTip="{Binding languages.NavAboutText}" Visibility="{Binding NavAboutVisible}">
                                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE946;" FontFamily="{StaticResource IconFont}" FontSize="20" Width="38" VerticalAlignment="Center" TextAlignment="Center"/><TextBlock Text="关于" FontFamily="{StaticResource DefaultFont}" FontSize="13" VerticalAlignment="Center" Visibility="{Binding IsSidebarExpanded, Converter={StaticResource BoolToVis}}"/></StackPanel>
                             </Button>
                         </StackPanel>

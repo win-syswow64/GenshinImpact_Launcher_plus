@@ -4,33 +4,35 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              mc:Ignorable="d" Background="{StaticResource PageOverlayBrush}">
-    <Grid Margin="32">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <TextBlock Grid.Row="0" Text="{Binding Title}" Style="{StaticResource TitleText}"
-                   Foreground="White" Margin="0,0,0,20"/>
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,0,0,16">
-            <TextBlock Text="{Binding Notify}" Foreground="#CCFFFFFF" FontSize="14"
-                       TextWrapping="Wrap"/>
-        </ScrollViewer>
-        <Grid Grid.Row="2" Margin="0,0,0,20">
-            <ProgressBar Style="{DynamicResource AccentProgressBar}"
-                         Maximum="{Binding DFC.DownloadBarMax}" Value="{Binding DFC.DownloadBarValue}"
-                         Visibility="{Binding ViewControlVisibility}" Height="6" VerticalAlignment="Center"/>
-            <TextBlock Text="{Binding DFC.DownloadLabel}" Foreground="#80FFFFFF" FontSize="12"
-                       Visibility="{Binding ViewControlVisibility}" HorizontalAlignment="Right"/>
-        </Grid>
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
-            <CheckBox Content="{Binding languages.UseGlobalUrl}" IsChecked="{Binding UseGlobalUrlCheck}"
-                      Style="{StaticResource ToggleSwitch}" VerticalAlignment="Center" Margin="0,0,24,0"/>
-            <Button Content="{Binding languages.UpdateSkipBtn}" Style="{StaticResource SecondaryButton}"
-                    IsEnabled="{Binding ButtonIsEnabled}" Click="SkipButton_Click" Margin="0,0,12,0"/>
-            <Button Content="{Binding languages.DownStartBtn}" Style="{StaticResource PrimaryButton}"
-                    Command="{Binding UpdateRunCommand}" IsEnabled="{Binding ButtonIsEnabled}"/>
-        </StackPanel>
+    <Grid Margin="36">
+        <Border Style="{StaticResource SubPageSurface}" MaxWidth="760" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Margin="0,0,0,20">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Border Width="44" Height="44" Background="#2AFFFFFF" CornerRadius="12">
+                        <TextBlock Text="&#xE777;" FontFamily="{StaticResource IconFont}" FontSize="20" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Grid.Column="1" Text="{Binding Title}" Style="{StaticResource SubtitleText}" Foreground="White" VerticalAlignment="Center" Margin="14,0,0,0"/>
+                </Grid>
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,0,0,16" MaxHeight="320">
+                    <TextBlock Text="{Binding Notify}" Foreground="#DFFFFFFF" FontSize="14" TextWrapping="Wrap" LineHeight="22"/>
+                </ScrollViewer>
+                <Grid Grid.Row="2" Margin="0,0,0,22">
+                    <ProgressBar Style="{DynamicResource AccentProgressBar}" Maximum="{Binding DFC.DownloadBarMax}" Value="{Binding DFC.DownloadBarValue}" Visibility="{Binding ViewControlVisibility}" Height="6" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding DFC.DownloadLabel}" Foreground="#BFFFFFFF" FontSize="12" Visibility="{Binding ViewControlVisibility}" HorizontalAlignment="Right"/>
+                </Grid>
+                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <CheckBox Content="{Binding languages.UseGlobalUrl}" IsChecked="{Binding UseGlobalUrlCheck}" Style="{StaticResource ToggleSwitch}" VerticalAlignment="Center" Margin="0,0,24,0"/>
+                    <Button Content="{Binding languages.UpdateSkipBtn}" Style="{StaticResource SecondaryButton}" IsEnabled="{Binding ButtonIsEnabled}" Click="SkipButton_Click" Margin="0,0,12,0"/>
+                    <Button Content="{Binding languages.DownStartBtn}" Style="{StaticResource PrimaryButton}" Command="{Binding UpdateRunCommand}" IsEnabled="{Binding ButtonIsEnabled}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </UserControl>

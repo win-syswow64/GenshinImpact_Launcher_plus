@@ -12,16 +12,18 @@
         </Grid.RowDefinitions>
 
         <!-- Top bar -->
-        <Grid Grid.Row="0" Height="48" VerticalAlignment="Top" Background="{StaticResource TopBarBrush}">
-            <StackPanel Orientation="Horizontal" Margin="12,0">
-                <Button Style="{StaticResource IconButton}" Width="32" Height="32"
+        <Border Grid.Row="0" Style="{StaticResource SubPageHeader}" Height="64">
+            <StackPanel Orientation="Horizontal">
+                <Button Style="{StaticResource IconButton}" Width="36" Height="36"
                         Content="&#xE72B;" Foreground="#B0FFFFFF"
                         Command="{Binding BackCommand}" ToolTip="{Binding BackToolTip}"
                         VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextFillBrush}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                <Border Width="36" Height="36" Background="#24FFFFFF" CornerRadius="10" Margin="8,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="&#xE8B9;" FontFamily="{StaticResource IconFont}" FontSize="16" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TextFillBrush}" VerticalAlignment="Center" Margin="12,0,0,0"/>
             </StackPanel>
-        </Grid>
+        </Border>
 
         <!-- Content area -->
         <Grid Grid.Row="1">
@@ -46,14 +48,13 @@
             <!-- Timeline image list -->
             <ListBox x:Name="ImageListBox"
                      ItemsSource="{Binding Groups}"
-                     Background="Transparent" BorderThickness="0"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      VirtualizingPanel.IsVirtualizing="True"
                      VirtualizingPanel.VirtualizationMode="Recycling"
                      VirtualizingPanel.CacheLength="5"
                      VirtualizingPanel.CacheLengthUnit="Item"
                      SelectionMode="Extended"
-                     Margin="20,12,20,16">
+                     Margin="24,18,24,22" Padding="16" Background="#4018222F" BorderBrush="#2BFFFFFF" BorderThickness="1">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <StackPanel Margin="0,0,0,8">
