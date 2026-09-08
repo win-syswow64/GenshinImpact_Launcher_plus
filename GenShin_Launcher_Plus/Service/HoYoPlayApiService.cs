@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -21,10 +22,12 @@ namespace GenShin_Launcher_Plus.Service;
 /// </summary>
 public static class HoYoPlayApiService
 {
-    private static readonly HttpClient _httpClient = new(new HttpClientHandler
+    private static readonly HttpClient _httpClient = new(new SocketsHttpHandler
     {
-        AutomaticDecompression = System.Net.DecompressionMethods.All,
-    });
+        AutomaticDecompression = DecompressionMethods.All,
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+    }) { Timeout = Timeout.InfiniteTimeSpan };
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -32,6 +35,9 @@ public static class HoYoPlayApiService
     };
 
     private static readonly ConcurrentDictionary<string, (DateTimeOffset CachedAt, GameLauncherContent Content)> _gameContentCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, Lazy<Task<GameLauncherContent>>> _gameContentRequests = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan MetadataRequestTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ContentRequestTimeout = TimeSpan.FromSeconds(15);
 
     #region API Calls
 
@@ -46,11 +52,12 @@ public static class HoYoPlayApiService
 
             var url = $"{baseUrl}getGamePackages?launcher_id={launcherId}&language=zh-cn&game_ids[]={gameId}";
             Logger.Debug($"Fetching game package: {url}", "HoYoPlay");
-            var json = await _httpClient.GetStringAsync(url, ct).ConfigureAwait(false);
+            var json = await GetStringAsync(url, MetadataRequestTimeout, ct).ConfigureAwait(false);
             var resp = JsonSerializer.Deserialize<HoYoApiResponse<GamePackageResponse>>(json, _jsonOptions);
             if (resp?.Retcode != 0) { Logger.Warn($"GetGamePackage error: {resp?.Retcode} {resp?.Message}", "HoYoPlay"); return null; }
             return resp?.Data?.GamePackages?.FirstOrDefault(x => x.Game?.Id == gameId);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { Logger.Warn($"GetGamePackage: {ex.Message}", "HoYoPlay"); return null; }
     }
 
@@ -65,11 +72,12 @@ public static class HoYoPlayApiService
 
             var url = $"{baseUrl}getGameBranches?launcher_id={launcherId}&language=zh-cn&game_ids[]={gameId}";
             Logger.Debug($"Fetching game branch: {url}", "HoYoPlay");
-            var json = await _httpClient.GetStringAsync(url, ct).ConfigureAwait(false);
+            var json = await GetStringAsync(url, MetadataRequestTimeout, ct).ConfigureAwait(false);
             var resp = JsonSerializer.Deserialize<HoYoApiResponse<GameBranchResponse>>(json, _jsonOptions);
             if (resp?.Retcode != 0) { Logger.Warn($"GetGameBranch error: {resp?.Retcode} {resp?.Message}", "HoYoPlay"); return null; }
             return resp?.Data?.GameBranches?.FirstOrDefault(x => x.Game?.Id == gameId);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { Logger.Warn($"GetGameBranch: {ex.Message}", "HoYoPlay"); return null; }
     }
 
@@ -99,6 +107,28 @@ public static class HoYoPlayApiService
         if (_gameContentCache.TryGetValue(contentGameBiz, out var cached) && DateTimeOffset.UtcNow - cached.CachedAt < TimeSpan.FromMinutes(5))
             return cached.Content;
 
+        var request = _gameContentRequests.GetOrAdd(
+            contentGameBiz,
+            static key => new Lazy<Task<GameLauncherContent>>(
+                () => FetchGameLauncherContentAndReleaseAsync(key),
+                LazyThreadSafetyMode.ExecutionAndPublication));
+        return await request.Value.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    private static async Task<GameLauncherContent> FetchGameLauncherContentAndReleaseAsync(string contentGameBiz)
+    {
+        try
+        {
+            return await FetchGameLauncherContentCoreAsync(contentGameBiz).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gameContentRequests.TryRemove(contentGameBiz, out _);
+        }
+    }
+
+    private static async Task<GameLauncherContent> FetchGameLauncherContentCoreAsync(string contentGameBiz)
+    {
         try
         {
             var launcherId = HoYoPlayGameMap.GetLauncherId(contentGameBiz);
@@ -109,7 +139,7 @@ public static class HoYoPlayApiService
 
             var url = $"{baseUrl}getGameContent?launcher_id={launcherId}&language=zh-cn&game_id={gameId}";
             Logger.Debug($"Fetching official game content: {url}", "HoYoPlay");
-            var json = await _httpClient.GetStringAsync(url, ct).ConfigureAwait(false);
+            var json = await GetStringAsync(url, ContentRequestTimeout, CancellationToken.None).ConfigureAwait(false);
             var response = JsonSerializer.Deserialize<HoYoApiResponse<GameContentResponse>>(json, _jsonOptions);
             if (response?.Retcode != 0)
             {
@@ -136,13 +166,18 @@ public static class HoYoPlayApiService
                 .ToList();
 
             var result = new GameLauncherContent { Banners = banners, News = items };
-            _gameContentCache[contentGameBiz] = (DateTimeOffset.UtcNow, result);
+            // Do not cache an empty response: the home-page retry action must
+            // be able to recover immediately from a transient edge response.
+            if (banners.Count > 0 || items.Count > 0)
+                _gameContentCache[contentGameBiz] = (DateTimeOffset.UtcNow, result);
             return result;
         }
         catch (Exception ex)
         {
             Logger.Warn($"GetGameContent: {ex.Message}", "HoYoPlay");
-            return new GameLauncherContent();
+            return _gameContentCache.TryGetValue(contentGameBiz, out var stale)
+                ? stale.Content
+                : new GameLauncherContent();
         }
     }
 
@@ -175,11 +210,12 @@ public static class HoYoPlayApiService
             var (channel, subChannel) = HoYoPlayGameMap.GetChannelInfo(gameBiz);
             var url = $"{baseUrl}getGameChannelSDKs?launcher_id={launcherId}&language=zh-cn&game_ids[]={gameId}&channel={channel}&sub_channel={subChannel}";
             Logger.Debug($"Fetching game channel SDK: {url}", "HoYoPlay");
-            var json = await _httpClient.GetStringAsync(url, ct).ConfigureAwait(false);
+            var json = await GetStringAsync(url, MetadataRequestTimeout, ct).ConfigureAwait(false);
             var resp = JsonSerializer.Deserialize<HoYoApiResponse<GameChannelSdkResponse>>(json, _jsonOptions);
             if (resp?.Retcode != 0) { Logger.Warn($"GetGameChannelSDK error: {resp?.Retcode} {resp?.Message}", "HoYoPlay"); return null; }
             return resp?.Data?.GameChannelSDKs?.FirstOrDefault(x => x.Game?.Id == gameId);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { Logger.Warn($"GetGameChannelSDK: {ex.Message}", "HoYoPlay"); return null; }
     }
 
@@ -196,11 +232,12 @@ public static class HoYoPlayApiService
             if (!string.IsNullOrEmpty(tag)) url += $"&tag={tag}";
 
             Logger.Debug($"Fetching Sophon chunk build: {url}", "HoYoPlay");
-            var json = await _httpClient.GetStringAsync(url, ct);
+            var json = await GetStringAsync(url, MetadataRequestTimeout, ct).ConfigureAwait(false);
             var resp = JsonSerializer.Deserialize<HoYoApiResponse<SophonChunkBuildResponse>>(json, _jsonOptions);
             if (resp?.Retcode != 0) { Logger.Warn($"GetSophonChunkBuild error: {resp?.Retcode}", "HoYoPlay"); return null; }
             return resp?.Data;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { Logger.Warn($"GetSophonChunkBuild: {ex.Message}", "HoYoPlay"); return null; }
     }
 
@@ -242,7 +279,7 @@ public static class HoYoPlayApiService
             // Download
             var url = $"{manifestDownload.UrlPrefix.TrimEnd('/')}/{Uri.EscapeDataString(manifestFile.Id)}";
             Logger.Debug($"Downloading manifest: {url}", "Sophon");
-            var data = await _httpClient.GetByteArrayAsync(url, ct);
+            var data = await GetBytesAsync(url, TimeSpan.FromMinutes(2), ct).ConfigureAwait(false);
             await File.WriteAllBytesAsync(cacheFile, data, ct);
 
             // Decompress zstd and parse protobuf
@@ -255,11 +292,41 @@ public static class HoYoPlayApiService
             Logger.Debug($"Manifest parsed: {manifestFile.Id} ({parsed.Chuncks.Count} files)", "Sophon");
             return parsed;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Logger.Warn($"DownloadChunkManifest failed: {ex.Message}", "Sophon");
             return null;
         }
+    }
+
+    private static async Task<string> GetStringAsync(string url, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            timeoutSource.Token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync(timeoutSource.Token).ConfigureAwait(false);
+    }
+
+    private static async Task<byte[]> GetBytesAsync(string url, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            timeoutSource.Token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync(timeoutSource.Token).ConfigureAwait(false);
     }
 
     #endregion

@@ -93,9 +93,9 @@
     <FontFamily x:Key="TitleFont">Segoe UI Light, Microsoft YaHei UI Light</FontFamily>
 
     <!-- ===== CornerRadius ===== -->
-    <CornerRadius x:Key="ControlCornerRadius">4</CornerRadius>
-    <CornerRadius x:Key="CardCornerRadius">8</CornerRadius>
-    <CornerRadius x:Key="OverlayCornerRadius">12</CornerRadius>
+    <CornerRadius x:Key="ControlCornerRadius">8</CornerRadius>
+    <CornerRadius x:Key="CardCornerRadius">12</CornerRadius>
+    <CornerRadius x:Key="OverlayCornerRadius">16</CornerRadius>
     <CornerRadius x:Key="CircleCornerRadius">999</CornerRadius>
 
     <!-- ===== Button Styles ===== -->

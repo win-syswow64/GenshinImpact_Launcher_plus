@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GenShin_Launcher_Plus.Models;
 
 namespace GenShin_Launcher_Plus.Models.HoYoPlay;
 
@@ -15,7 +16,6 @@ public static class HoYoPlayGameMap
         string HoYoPlayBiz,
         string GameId,
         string LauncherId,
-        bool IsGlobal,
         int Channel,
         int SubChannel);
 
@@ -27,20 +27,20 @@ public static class HoYoPlayGameMap
 
     private static readonly Dictionary<string, GameMapEntry> Entries = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["genshin_cn"] = new("genshin_cn", "hk4e_cn", "1Z8W5NHUQb", ChinaOfficialLauncherId, false, 1, 1),
-        ["genshin_global"] = new("genshin_global", "hk4e_global", "gopR6Cufr3", GlobalOfficialLauncherId, true, 1, 1),
-        ["genshin_bilibili"] = new("genshin_bilibili", "hk4e_bilibili", "T2S0Gz4Dr2", BilibiliGenshinLauncherId, false, 14, 0),
+        ["genshin_cn"] = new("genshin_cn", "hk4e_cn", "1Z8W5NHUQb", ChinaOfficialLauncherId, 1, 1),
+        ["genshin_global"] = new("genshin_global", "hk4e_global", "gopR6Cufr3", GlobalOfficialLauncherId, 1, 1),
+        ["genshin_bilibili"] = new("genshin_bilibili", "hk4e_bilibili", "T2S0Gz4Dr2", BilibiliGenshinLauncherId, 14, 0),
 
-        ["starrail_cn"] = new("starrail_cn", "hkrpg_cn", "64kMb5iAWu", ChinaOfficialLauncherId, false, 1, 1),
-        ["starrail_global"] = new("starrail_global", "hkrpg_global", "4ziysqXOQ8", GlobalOfficialLauncherId, true, 1, 1),
-        ["starrail_bilibili"] = new("starrail_bilibili", "hkrpg_bilibili", "EdtUqXfCHh", BilibiliStarRailLauncherId, false, 14, 0),
+        ["starrail_cn"] = new("starrail_cn", "hkrpg_cn", "64kMb5iAWu", ChinaOfficialLauncherId, 1, 1),
+        ["starrail_global"] = new("starrail_global", "hkrpg_global", "4ziysqXOQ8", GlobalOfficialLauncherId, 1, 1),
+        ["starrail_bilibili"] = new("starrail_bilibili", "hkrpg_bilibili", "EdtUqXfCHh", BilibiliStarRailLauncherId, 14, 0),
 
-        ["zzz_cn"] = new("zzz_cn", "nap_cn", "x6znKlJ0xK", ChinaOfficialLauncherId, false, 1, 1),
-        ["zzz_global"] = new("zzz_global", "nap_global", "U5hbdsT9W7", GlobalOfficialLauncherId, true, 1, 1),
-        ["zzz_bilibili"] = new("zzz_bilibili", "nap_bilibili", "HXAFlmYa17", BilibiliZZZLauncherId, false, 14, 0),
+        ["zzz_cn"] = new("zzz_cn", "nap_cn", "x6znKlJ0xK", ChinaOfficialLauncherId, 1, 1),
+        ["zzz_global"] = new("zzz_global", "nap_global", "U5hbdsT9W7", GlobalOfficialLauncherId, 1, 1),
+        ["zzz_bilibili"] = new("zzz_bilibili", "nap_bilibili", "HXAFlmYa17", BilibiliZZZLauncherId, 14, 0),
 
-        ["honkai3_cn"] = new("honkai3_cn", "bh3_cn", "osvnlOc0S8", ChinaOfficialLauncherId, false, 1, 1),
-        ["honkai3_global"] = new("honkai3_global", "bh3_global", "5TIVvvcwtM", GlobalOfficialLauncherId, true, 1, 1),
+        ["honkai3_cn"] = new("honkai3_cn", "bh3_cn", "osvnlOc0S8", ChinaOfficialLauncherId, 1, 1),
+        ["honkai3_global"] = new("honkai3_global", "bh3_global", "5TIVvvcwtM", GlobalOfficialLauncherId, 1, 1),
     };
 
     private static readonly Dictionary<string, string> HoYoPlayBizToAppBiz = new(StringComparer.OrdinalIgnoreCase)
@@ -70,18 +70,36 @@ public static class HoYoPlayGameMap
         return TryGetEntry(gameBiz, out var entry) ? entry.LauncherId : null;
     }
 
-    public static string GetApiBaseUrl(string gameBiz)
-    {
-        if (TryGetEntry(gameBiz, out var entry) && entry.IsGlobal)
-            return "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/";
-        return "https://hyp-api.mihoyo.com/hyp/hyp-connect/api/";
-    }
+    /// <summary>
+    /// Select the HoYoPlay metadata/content API from the requested game
+    /// channel. Unlike launcher artwork, game packages are server-specific.
+    /// </summary>
+    public static string GetApiBaseUrl(string gameBiz) =>
+        new GameBiz(ToAppBiz(gameBiz)).IsGlobalServer()
+            ? "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/"
+            : "https://hyp-api.mihoyo.com/hyp/hyp-connect/api/";
 
-    public static string GetSophonBaseUrl(string gameBiz)
+    /// <summary>Select the Sophon downloader API from the game channel.</summary>
+    public static string GetSophonBaseUrl(string gameBiz) =>
+        new GameBiz(ToAppBiz(gameBiz)).IsGlobalServer()
+            ? "https://sg-downloader-api.hoyoverse.com/downloader/sophon_chunk/api/"
+            : "https://downloader-api.mihoyo.com/downloader/sophon_chunk/api/";
+
+    /// <summary>
+    /// Region-based routing is intentionally reserved for launcher artwork.
+    /// </summary>
+    public static string GetRegionalArtworkApiBaseUrl(bool isChina) => isChina
+        ? "https://hyp-api.mihoyo.com/hyp/hyp-connect/api/"
+        : "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/";
+
+    /// <summary>
+    /// Artwork follows the viewer's network region, so the launcher id and
+    /// game id must be changed together with the artwork API host.
+    /// </summary>
+    public static string GetRegionalArtworkGameBiz(string gameBiz, bool isChina)
     {
-        if (TryGetEntry(gameBiz, out var entry) && entry.IsGlobal)
-            return "https://sg-downloader-api.hoyoverse.com/downloader/sophon_chunk/api/";
-        return "https://downloader-api.mihoyo.com/downloader/sophon_chunk/api/";
+        var appBiz = new GameBiz(ToAppBiz(gameBiz));
+        return $"{appBiz.Game}_{(isChina ? "cn" : "global")}";
     }
 
     public static (int Channel, int SubChannel) GetChannelInfo(string gameBiz)
@@ -99,9 +117,7 @@ public static class HoYoPlayGameMap
 
     public static string ToAppBiz(string gameBiz)
     {
-        if (Entries.ContainsKey(gameBiz))
-            return gameBiz;
-        return HoYoPlayBizToAppBiz.TryGetValue(gameBiz, out var appBiz) ? appBiz : gameBiz;
+        return TryGetEntry(gameBiz, out var entry) ? entry.AppBiz : gameBiz;
     }
 
     public static bool IsKnown(string gameBiz) => TryGetEntry(gameBiz, out _);

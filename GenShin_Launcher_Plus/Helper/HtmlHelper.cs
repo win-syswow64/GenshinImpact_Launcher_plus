@@ -2,19 +2,25 @@
 using System.Net;
 using System.Net.Http;
 using GenShin_Launcher_Plus.Helper;
+using GenShin_Launcher_Plus.Service;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace GenShin_Launcher_Plus.Helper
 {
     public static class HtmlHelper
     {
-        public static async Task<JsonElement> GetAPIData(string url)
+        private static readonly HttpClient HttpClient = new()
         {
-            using var client = new HttpClient();
-            var response = await client.GetAsync(url).ConfigureAwait(false);
+            Timeout = TimeSpan.FromSeconds(15),
+        };
+
+        public static async Task<JsonElement> GetAPIData(string url, CancellationToken cancellationToken = default)
+        {
+            using var response = await HttpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            string responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var doc = JsonDocument.Parse(responseBody);
             return doc.RootElement.Clone();
         }
@@ -74,30 +80,18 @@ namespace GenShin_Launcher_Plus.Helper
         {
             var profile = App.Current.DataModel?.ActiveGame;
             if (profile == null) return string.Empty;
-            string url = $"https://hyp-api.mihoyo.com/hyp/hyp-connect/api/getAllGameBasicInfo?launcher_id={profile.ApiLauncherId}&language=zh-cn";
+            string gameBiz = App.Current.DataModel.ActiveGameBiz;
             try
             {
-                var data = await GetAPIData(url).ConfigureAwait(false);
-                var list = data.GetProperty("data").GetProperty("game_info_list");
-                for (int i = 0; i < list.GetArrayLength(); i++)
+                // Keep all artwork routing in BackgroundService. It chooses
+                // the API host and its matching launcher/game ids by IP.
+                var backgrounds = await BackgroundService.FetchBackgroundsAsync(profile, gameBiz).ConfigureAwait(false);
+                foreach (var background in backgrounds)
                 {
-                    var gameId = list[i].GetProperty("game").GetProperty("id").ToString();
-                    if (gameId == profile.ApiGameId)
-                    {
-                        var bgUrl = list[i].GetProperty("backgrounds")[0]
-                            .GetProperty("background")
-                            .GetProperty("url")
-                            .ToString();
-                        Logger.Debug($"Background URL for {profile.Id}: {bgUrl}", "API");
-                        return bgUrl;
-                    }
+                    if (!string.IsNullOrWhiteSpace(background.Background?.Url))
+                        return background.Background.Url;
                 }
-                var fallback = list[0].GetProperty("backgrounds")[0]
-                    .GetProperty("background")
-                    .GetProperty("url")
-                    .ToString();
-                Logger.Debug($"Background URL (fallback): {fallback}", "API");
-                return fallback;
+                return string.Empty;
             }
             catch (Exception ex)
             {
@@ -110,17 +104,12 @@ namespace GenShin_Launcher_Plus.Helper
         {
             var profile = App.Current.DataModel?.ActiveGame;
             if (profile == null) return string.Empty;
-            string url = $"https://hyp-api.mihoyo.com/hyp/hyp-connect/api/getGameBranches?launcher_id={profile.ApiLauncherId}&language=zh-cn&game_ids[]={profile.ApiGameId}";
+            string gameBiz = App.Current.DataModel.ActiveGameBiz;
             try
             {
-                var data = await GetAPIData(url).ConfigureAwait(false);
-                var version = data.GetProperty("data")
-                   .GetProperty("game_branches")[0]
-                   .GetProperty("main")
-                   .GetProperty("tag")
-                   .ToString();
+                var (version, _) = await HoYoPlayApiService.GetLatestVersionsAsync(gameBiz).ConfigureAwait(false);
                 Logger.Debug($"PKG version for {profile.Id}: {version}", "API");
-                return version;
+                return version ?? string.Empty;
             }
             catch (Exception ex)
             {

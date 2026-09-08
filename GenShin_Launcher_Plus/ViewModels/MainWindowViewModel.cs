@@ -64,6 +64,7 @@ namespace GenShin_Launcher_Plus.ViewModels
 
             ExitProgramCommand = new RelayCommand(ExitProgram);
             MainMinimizedCommand = new RelayCommand(MainMinimized);
+            MainMaximizedCommand = new RelayCommand(ToggleWindowState);
             OpenAboutCommand = new RelayCommand(OpenAbout);
             OpenQQGroupUrlCommand = new RelayCommand(() => FileHelper.OpenUrl("https://qm.qq.com/q/UZWuLb38om"));
             OpenImagesDirectoryCommand = new RelayCommand(OpenImagesDirectory);
@@ -91,15 +92,18 @@ namespace GenShin_Launcher_Plus.ViewModels
                         OnPropertyChanged(nameof(ShowPreDownloadButton));
                         OnPropertyChanged(nameof(InstallStatusTitle));
                         OnPropertyChanged(nameof(InstallControlText));
+                        OnPropertyChanged(nameof(CanToggleInstallPause));
                         OnPropertyChanged(nameof(InstallDetailText));
                         OnPropertyChanged(nameof(CanVerifyGame));
                         OnPropertyChanged(nameof(CanRepairGame));
+                        OnPropertyChanged(nameof(CanChangeGameSelection));
                         OnPropertyChanged(nameof(VersionStatusText));
                         break;
                     case nameof(GameInstallService.ProgressPercent):
                     case nameof(GameInstallService.ProgressText):
                     case nameof(GameInstallService.DownloadSpeedText):
                     case nameof(GameInstallService.BytesProgressText):
+                    case nameof(GameInstallService.RemainingTimeText):
                     case nameof(GameInstallService.VerificationSummary):
                     case nameof(GameInstallService.ErrorText):
                         // These bind directly, but also update button text
@@ -122,6 +126,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             PreDownloadCommand = new AsyncRelayCommand(PreDownloadAsync);
             CancelInstallCommand = new RelayCommand(CancelInstall);
             ContinueInstallCommand = new AsyncRelayCommand(ContinueInstallAsync);
+            ToggleInstallPauseCommand = new AsyncRelayCommand(ToggleInstallPauseAsync);
             VerifyGameCommand = new AsyncRelayCommand(VerifyGameAsync);
             RepairGameCommand = new AsyncRelayCommand(RepairGameAsync);
             OpenGameNewsCommand = new RelayCommand<GameNewsItem>(OpenGameNews);
@@ -129,6 +134,7 @@ namespace GenShin_Launcher_Plus.ViewModels
             PreviousGameBannerCommand = new RelayCommand(PreviousGameBanner);
             NextGameBannerCommand = new RelayCommand(NextGameBanner);
             SelectGameNewsCategoryCommand = new RelayCommand<string>(SelectGameNewsCategory);
+            RefreshGameNewsCommand = new AsyncRelayCommand(RefreshGameNewsAsync);
             languages.PropertyChanged += (_, _) =>
             {
                 Title = "GenShin Launcher Plus";
@@ -155,8 +161,8 @@ namespace GenShin_Launcher_Plus.ViewModels
         // === Game Install Service (exposed for XAML binding) ===
         public GameInstallService InstallService { get; }
 
-        private GameStateInfo _gameState;
-        public GameStateInfo CurrentGameState
+        private GameStateInfo? _gameState;
+        public GameStateInfo? CurrentGameState
         {
             get => _gameState;
             set
@@ -172,6 +178,38 @@ namespace GenShin_Launcher_Plus.ViewModels
                 OnPropertyChanged(nameof(InstallStatusTitle));
                 OnPropertyChanged(nameof(CanVerifyGame));
                 OnPropertyChanged(nameof(CanRepairGame));
+                OnPropertyChanged(nameof(CanChangeGameSelection));
+            }
+        }
+
+        private bool _isGameStateLoading;
+        public bool IsGameStateLoading
+        {
+            get => _isGameStateLoading;
+            private set
+            {
+                if (SetProperty(ref _isGameStateLoading, value))
+                {
+                    OnPropertyChanged(nameof(ActionButtonText));
+                    OnPropertyChanged(nameof(ActionButtonEnabled));
+                    OnPropertyChanged(nameof(VersionStatusText));
+                    OnPropertyChanged(nameof(CanChangeGameSelection));
+                }
+            }
+        }
+
+        private string _gameStateErrorText = string.Empty;
+        public string GameStateErrorText
+        {
+            get => _gameStateErrorText;
+            private set
+            {
+                if (SetProperty(ref _gameStateErrorText, value))
+                {
+                    OnPropertyChanged(nameof(VersionStatusText));
+                    OnPropertyChanged(nameof(ActionButtonText));
+                    OnPropertyChanged(nameof(ActionButtonEnabled));
+                }
             }
         }
 
@@ -184,8 +222,10 @@ namespace GenShin_Launcher_Plus.ViewModels
                     return InstallService.StateText;
                 if (InstallService.CanContinue)
                     return $"继续{InstallService.OperationText}";
+                if (IsGameStateLoading)
+                    return "正在检查…";
                 if (CurrentGameState == null)
-                    return languages.RunGameBtn ?? "启动游戏";
+                    return string.IsNullOrWhiteSpace(GameStateErrorText) ? "暂不可用" : "重试检查";
                 return CurrentGameState.State switch
                 {
                     GameState.NotInstalled => languages.InstallGameBtn ?? "安装游戏",
@@ -196,8 +236,9 @@ namespace GenShin_Launcher_Plus.ViewModels
         }
 
         public bool ActionButtonEnabled =>
-            !InstallService.IsInstalling && !IsSwitchingServer &&
-            CurrentGameState?.State != GameState.Running;
+            !IsGameStateLoading && !InstallService.IsInstalling && !IsSwitchingServer &&
+            (CurrentGameState?.State != GameState.Running) &&
+            (CurrentGameState != null || !string.IsNullOrWhiteSpace(GameStateErrorText));
 
         public bool ShowInstallPanel =>
             CurrentGameState?.State == GameState.NotInstalled && !InstallService.IsTaskVisible;
@@ -214,6 +255,10 @@ namespace GenShin_Launcher_Plus.ViewModels
         {
             get
             {
+                if (IsGameStateLoading)
+                    return "正在检查游戏状态…";
+                if (!string.IsNullOrWhiteSpace(GameStateErrorText))
+                    return GameStateErrorText;
                 if (CurrentGameState == null)
                     return "";
 
@@ -249,20 +294,30 @@ namespace GenShin_Launcher_Plus.ViewModels
                 if (!string.IsNullOrWhiteSpace(InstallService.VerificationSummary) && InstallService.Operation == GameInstallOperation.Verify)
                     return InstallService.VerificationSummary;
                 if (!string.IsNullOrWhiteSpace(InstallService.BytesProgressText) || !string.IsNullOrWhiteSpace(InstallService.DownloadSpeedText))
-                    return $"{InstallService.BytesProgressText}  {InstallService.DownloadSpeedText}".Trim();
+                {
+                    var remaining = string.IsNullOrWhiteSpace(InstallService.RemainingTimeText)
+                        ? ""
+                        : $"  剩余 {InstallService.RemainingTimeText}";
+                    return $"{InstallService.BytesProgressText}  {InstallService.DownloadSpeedText}{remaining}".Trim();
+                }
                 return InstallService.StatusText;
             }
         }
 
         public string InstallControlText => InstallService.CanContinue ? "继续" : "暂停";
-        public bool CanVerifyGame => !InstallService.IsTaskVisible && CurrentGameState?.State is not null and not GameState.NotInstalled;
-        public bool CanRepairGame => !InstallService.IsTaskVisible && CurrentGameState?.State is not null and not GameState.NotInstalled;
+        public bool CanToggleInstallPause => InstallService.CanPause || InstallService.CanContinue;
+        public bool CanVerifyGame => !InstallService.IsTaskVisible &&
+            CurrentGameState?.State is GameState.Ready or GameState.NeedUpdate or GameState.PreDownloadAvailable;
+        public bool CanRepairGame => !InstallService.IsTaskVisible &&
+            CurrentGameState?.State is GameState.Ready or GameState.NeedUpdate or GameState.PreDownloadAvailable;
+        public bool CanChangeGameSelection => !InstallService.IsTaskVisible && !IsSwitchingServer && !IsGameStateLoading;
 
         public ICommand InstallGameCommand { get; }
         public ICommand UpdateGameCommand { get; }
         public ICommand PreDownloadCommand { get; }
         public ICommand CancelInstallCommand { get; }
         public ICommand ContinueInstallCommand { get; }
+        public ICommand ToggleInstallPauseCommand { get; }
         public ICommand VerifyGameCommand { get; }
         public ICommand RepairGameCommand { get; }
 
@@ -273,7 +328,11 @@ namespace GenShin_Launcher_Plus.ViewModels
                 await ContinueInstallAsync();
                 return;
             }
-            if (CurrentGameState == null) return;
+            if (CurrentGameState == null)
+            {
+                await RefreshGameStateAsync();
+                return;
+            }
             switch (CurrentGameState.State)
             {
                 case GameState.NotInstalled:
@@ -377,6 +436,14 @@ namespace GenShin_Launcher_Plus.ViewModels
             await RefreshGameStateAsync();
         }
 
+        private async Task ToggleInstallPauseAsync()
+        {
+            if (InstallService.CanContinue)
+                await ContinueInstallAsync();
+            else if (InstallService.CanPause)
+                CancelInstall();
+        }
+
         private async Task VerifyGameAsync()
         {
             var gameBiz = _session.Data.ActiveGameBiz;
@@ -417,8 +484,12 @@ namespace GenShin_Launcher_Plus.ViewModels
         public async Task RefreshGameStateAsync()
         {
             _gameStateCts?.Cancel();
-            _gameStateCts = new System.Threading.CancellationTokenSource();
-            var token = _gameStateCts.Token;
+            var refresh = new System.Threading.CancellationTokenSource();
+            _gameStateCts = refresh;
+            var token = refresh.Token;
+            IsGameStateLoading = true;
+            GameStateErrorText = string.Empty;
+            CurrentGameState = null;
             try
             {
                 var gameBiz = _session.Data.ActiveGameBiz;
@@ -428,8 +499,17 @@ namespace GenShin_Launcher_Plus.ViewModels
                 token.ThrowIfCancellationRequested();
                 CurrentGameState = state;
             }
-            catch (TaskCanceledException) { }
-            catch (Exception ex) { Logger.Warn($"RefreshGameState failed: {ex.Message}", "GameState"); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception ex)
+            {
+                GameStateErrorText = "游戏状态检查失败";
+                Logger.Warn($"RefreshGameState failed: {ex.Message}", "GameState");
+            }
+            finally
+            {
+                if (ReferenceEquals(_gameStateCts, refresh))
+                    IsGameStateLoading = false;
+            }
         }
 
         // === Standard properties ===
@@ -449,7 +529,7 @@ namespace GenShin_Launcher_Plus.ViewModels
                 }
             }
         }
-        public GridLength SidebarWidth => new(IsSidebarExpanded ? 220 : 70);
+        public double SidebarWidth => IsSidebarExpanded ? 220 : 70;
         public double SidebarButtonWidth => IsSidebarExpanded ? 204 : 54;
         private ImageBrush _background = new();
         public ImageBrush Background { get => _background; set => SetProperty(ref _background, value); }
@@ -463,6 +543,7 @@ namespace GenShin_Launcher_Plus.ViewModels
 
         public ICommand ExitProgramCommand { get; }
         public ICommand MainMinimizedCommand { get; }
+        public ICommand MainMaximizedCommand { get; }
         public ICommand OpenAboutCommand { get; }
         public ICommand OpenQQGroupUrlCommand { get; }
         public ICommand OpenImagesDirectoryCommand { get; }
@@ -479,6 +560,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         public ICommand PreviousGameBannerCommand { get; }
         public ICommand NextGameBannerCommand { get; }
         public ICommand SelectGameNewsCategoryCommand { get; }
+        public ICommand RefreshGameNewsCommand { get; }
 
         public Visibility NavScreenshotsVisible => _session.Data.NavScreenshots ? Visibility.Visible : Visibility.Collapsed;
         public Visibility NavQQGroupVisible => _session.Data.NavQQGroup ? Visibility.Visible : Visibility.Collapsed;
@@ -496,10 +578,19 @@ namespace GenShin_Launcher_Plus.ViewModels
         }
 
         private List<GameBannerItem> _gameBanners = new();
-        public List<GameBannerItem> GameBanners { get => _gameBanners; private set => SetProperty(ref _gameBanners, value); }
+        public List<GameBannerItem> GameBanners
+        {
+            get => _gameBanners;
+            private set
+            {
+                if (SetProperty(ref _gameBanners, value))
+                    OnPropertyChanged(nameof(HasMultipleBanners));
+            }
+        }
         private int _currentGameBannerIndex;
         public GameBannerItem? CurrentGameBanner => GameBanners.Count == 0 ? null : GameBanners[_currentGameBannerIndex % GameBanners.Count];
         public string GameBannerPosition => GameBanners.Count > 1 ? $"{_currentGameBannerIndex + 1}/{GameBanners.Count}" : "";
+        public bool HasMultipleBanners => GameBanners.Count > 1;
 
         private List<GameNewsItem> _activityNews = new();
         public List<GameNewsItem> ActivityNews { get => _activityNews; private set => SetProperty(ref _activityNews, value); }
@@ -507,6 +598,33 @@ namespace GenShin_Launcher_Plus.ViewModels
         public List<GameNewsItem> AnnouncementNews { get => _announcementNews; private set => SetProperty(ref _announcementNews, value); }
         private List<GameNewsItem> _informationNews = new();
         public List<GameNewsItem> InformationNews { get => _informationNews; private set => SetProperty(ref _informationNews, value); }
+        private System.Threading.CancellationTokenSource? _newsCts;
+        private bool _isNewsLoading;
+        public bool IsNewsLoading
+        {
+            get => _isNewsLoading;
+            private set
+            {
+                if (SetProperty(ref _isNewsLoading, value))
+                {
+                    OnPropertyChanged(nameof(NewsStatusText));
+                    OnPropertyChanged(nameof(ShowNewsStatus));
+                }
+            }
+        }
+        private string _newsErrorText = string.Empty;
+        public string NewsErrorText
+        {
+            get => _newsErrorText;
+            private set
+            {
+                if (SetProperty(ref _newsErrorText, value))
+                {
+                    OnPropertyChanged(nameof(NewsStatusText));
+                    OnPropertyChanged(nameof(ShowNewsStatus));
+                }
+            }
+        }
         private string _selectedNewsCategory = "活动";
         public string SelectedNewsCategory
         {
@@ -519,6 +637,9 @@ namespace GenShin_Launcher_Plus.ViewModels
                     OnPropertyChanged(nameof(IsActivityNewsSelected));
                     OnPropertyChanged(nameof(IsAnnouncementNewsSelected));
                     OnPropertyChanged(nameof(IsInformationNewsSelected));
+                    OnPropertyChanged(nameof(HasDisplayedGameNews));
+                    OnPropertyChanged(nameof(ShowNewsStatus));
+                    OnPropertyChanged(nameof(NewsStatusText));
                 }
             }
         }
@@ -531,6 +652,11 @@ namespace GenShin_Launcher_Plus.ViewModels
         public bool IsActivityNewsSelected => SelectedNewsCategory == "活动";
         public bool IsAnnouncementNewsSelected => SelectedNewsCategory == "公告";
         public bool IsInformationNewsSelected => SelectedNewsCategory == "资讯";
+        public bool HasDisplayedGameNews => DisplayedGameNews.Count > 0;
+        public bool ShowNewsStatus => IsNewsLoading || !HasDisplayedGameNews;
+        public string NewsStatusText => IsNewsLoading
+            ? "正在获取资讯…"
+            : !string.IsNullOrWhiteSpace(NewsErrorText) ? NewsErrorText : "暂无资讯";
 
         public List<GameProfile> GameList => GameProfiles.All;
 
@@ -618,7 +744,10 @@ namespace GenShin_Launcher_Plus.ViewModels
             private set
             {
                 if (SetProperty(ref _isSwitchingServer, value))
+                {
                     OnPropertyChanged(nameof(ActionButtonEnabled));
+                    OnPropertyChanged(nameof(CanChangeGameSelection));
+                }
             }
         }
 
@@ -713,9 +842,9 @@ namespace GenShin_Launcher_Plus.ViewModels
             try
             {
                 await Task.Delay(200, token);
-                await MainService.LoadGameBackgroundAsync();
+                await MainService.LoadGameBackgroundAsync(token);
             }
-            catch (TaskCanceledException) { }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch (Exception ex) { Logger.Warn("Background reload failed: " + ex.Message, "Background"); }
         }
 
@@ -795,6 +924,9 @@ namespace GenShin_Launcher_Plus.ViewModels
             if (result) Environment.Exit(0);
         }
         private void MainMinimized() => _main.WindowState = WindowState.Minimized;
+        private void ToggleWindowState() => _main.WindowState = _main.WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
         private void OpenImagesDirectory() => _navigationService.NavigateScreenshots();
         private void OpenAbout()
         {
@@ -803,21 +935,61 @@ namespace GenShin_Launcher_Plus.ViewModels
         }
         private async Task RefreshGameNewsAsync()
         {
+            _newsCts?.Cancel();
+            var refresh = new System.Threading.CancellationTokenSource();
+            _newsCts = refresh;
+            var token = refresh.Token;
             var gameBiz = _session.Data.ActiveGameBiz;
-            var content = await HoYoPlayApiService.GetGameLauncherContentAsync(gameBiz);
-            if (!string.Equals(gameBiz, _session.Data.ActiveGameBiz, StringComparison.OrdinalIgnoreCase))
-                return;
-
-            GameBanners = content.Banners;
+            IsNewsLoading = true;
+            NewsErrorText = string.Empty;
+            _bannerTimer.Stop();
+            GameBanners = new List<GameBannerItem>();
+            ActivityNews = new List<GameNewsItem>();
+            AnnouncementNews = new List<GameNewsItem>();
+            InformationNews = new List<GameNewsItem>();
             _currentGameBannerIndex = 0;
             OnPropertyChanged(nameof(CurrentGameBanner));
             OnPropertyChanged(nameof(GameBannerPosition));
-            if (GameBanners.Count > 1) _bannerTimer.Start(); else _bannerTimer.Stop();
-
-            ActivityNews = content.News.Where(x => x.Category == "活动").Take(3).ToList();
-            AnnouncementNews = content.News.Where(x => x.Category == "公告").Take(3).ToList();
-            InformationNews = content.News.Where(x => x.Category == "资讯").Take(3).ToList();
             OnPropertyChanged(nameof(DisplayedGameNews));
+            OnPropertyChanged(nameof(HasDisplayedGameNews));
+            OnPropertyChanged(nameof(ShowNewsStatus));
+            try
+            {
+                var content = await HoYoPlayApiService.GetGameLauncherContentAsync(gameBiz, token);
+                token.ThrowIfCancellationRequested();
+                if (!string.Equals(gameBiz, _session.Data.ActiveGameBiz, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                GameBanners = content.Banners;
+                _currentGameBannerIndex = 0;
+                OnPropertyChanged(nameof(CurrentGameBanner));
+                OnPropertyChanged(nameof(GameBannerPosition));
+                if (GameBanners.Count > 1) _bannerTimer.Start(); else _bannerTimer.Stop();
+
+                ActivityNews = content.News.Where(x => x.Category == "活动").Take(3).ToList();
+                AnnouncementNews = content.News.Where(x => x.Category == "公告").Take(3).ToList();
+                InformationNews = content.News.Where(x => x.Category == "资讯").Take(3).ToList();
+                OnPropertyChanged(nameof(DisplayedGameNews));
+                OnPropertyChanged(nameof(HasDisplayedGameNews));
+                OnPropertyChanged(nameof(ShowNewsStatus));
+                OnPropertyChanged(nameof(NewsStatusText));
+                if (content.News.Count == 0)
+                    NewsErrorText = "未获取到资讯，点击重试";
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                Logger.Debug($"News refresh canceled: {gameBiz}", "HoYoPlay");
+            }
+            catch (Exception ex)
+            {
+                NewsErrorText = "资讯加载失败，点击重试";
+                Logger.Warn($"News refresh failed: {ex.Message}", "HoYoPlay");
+            }
+            finally
+            {
+                if (ReferenceEquals(_newsCts, refresh))
+                    IsNewsLoading = false;
+            }
         }
     }
 }

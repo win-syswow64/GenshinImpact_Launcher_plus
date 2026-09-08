@@ -25,7 +25,7 @@ namespace GenShin_Launcher_Plus.ViewModels
         private readonly ISettingService _settingService;
         private readonly IUpdateService _updateService;
         private readonly Func<GameInstallService> _gameInstallServiceFactory;
-        private readonly Func<MainWindow, MainWindowViewModel, IMainWindowService> _mainServiceFactory;
+        private CancellationTokenSource? _backgroundSelectionCts;
 
         public SettingsPageViewModel(
             int mode,
@@ -33,15 +33,13 @@ namespace GenShin_Launcher_Plus.ViewModels
             IUserDataService userDataService,
             IRegistryService registryService,
             IUpdateService updateService,
-            Func<GameInstallService> gameInstallServiceFactory,
-            Func<MainWindow, MainWindowViewModel, IMainWindowService> mainServiceFactory)
+            Func<GameInstallService> gameInstallServiceFactory)
         {
             _settingService = settingService;
             _userDataService = userDataService;
             _registryService = registryService;
             _updateService = updateService;
             _gameInstallServiceFactory = gameInstallServiceFactory;
-            _mainServiceFactory = mainServiceFactory;
             _settingService.Initialize(this);
             _isGameMode = mode == 0;
             _flipViewSelectedIndex = mode == 0 ? 0 : 2;
@@ -366,6 +364,10 @@ namespace GenShin_Launcher_Plus.ViewModels
             var profile = App.Current.DataModel.ActiveGame;
             if (profile == null) return;
             var item = BackgroundItems[index];
+            _backgroundSelectionCts?.Cancel();
+            var selection = new CancellationTokenSource();
+            _backgroundSelectionCts = selection;
+            var token = selection.Token;
 
             try
             {
@@ -373,41 +375,57 @@ namespace GenShin_Launcher_Plus.ViewModels
                 App.Current.DataModel.SetCustomBackground(profile.Id, "");
                 App.Current.DataModel.SetSelectedBackgroundId(profile.Id, item.Id);
 
-                var selected = (await BackgroundService.FetchBackgroundsAsync(profile)).FirstOrDefault(b => b.Id == item.Id);
+                var selected = (await BackgroundService.FetchBackgroundsAsync(profile, App.Current.DataModel.ActiveGameBiz, token))
+                    .FirstOrDefault(b => b.Id == item.Id);
                 string url = item.IsVideo
                     ? selected?.Video?.Url
                     : item.DisplayUrl;
 
                 if (!string.IsNullOrEmpty(url))
                 {
-                    string? cached = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id);
+                    string? cached = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id, token);
                     if (!string.IsNullOrEmpty(cached))
                     {
                         if (item.IsVideo)
                         {
                             string? themePath = null;
                             if (!string.IsNullOrEmpty(selected?.Theme?.Url))
-                                themePath = await BackgroundService.CacheBackgroundFileAsync(selected.Theme.Url, profile.Id);
+                                themePath = await BackgroundService.CacheBackgroundFileAsync(selected.Theme.Url, profile.Id, token);
 
                             string? fallbackPath = null;
                             if (!string.IsNullOrEmpty(selected?.Background?.Url))
-                                fallbackPath = await BackgroundService.CacheBackgroundFileAsync(selected.Background.Url, profile.Id);
+                                fallbackPath = await BackgroundService.CacheBackgroundFileAsync(selected.Background.Url, profile.Id, token);
 
-                            string playbackPath = await BackgroundService.PreparePlayableVideoAsync(cached, profile.Id, selected?.Video?.Url);
+                            string playbackPath = await BackgroundService.PreparePlayableVideoAsync(cached, profile.Id, selected?.Video?.Url, token);
+                            token.ThrowIfCancellationRequested();
+                            if (App.Current.DataModel.ActiveGame?.Id != profile.Id ||
+                                App.Current.DataModel.GetSelectedBackgroundId(profile.Id) != item.Id)
+                                return;
                             App.Current.ThisMainWindow.SetBackgroundVideo(playbackPath, themePath, fallbackPath);
                             BackgroundService.CleanupUnusedBackgroundCache(profile.Id, new[] { cached, themePath, fallbackPath, playbackPath });
                         }
                         else
                         {
+                            token.ThrowIfCancellationRequested();
+                            if (App.Current.DataModel.ActiveGame?.Id != profile.Id ||
+                                App.Current.DataModel.GetSelectedBackgroundId(profile.Id) != item.Id)
+                                return;
                             App.Current.ThisMainWindow.SetBackgroundImage(cached);
                             BackgroundService.CleanupUnusedBackgroundCache(profile.Id, new[] { cached });
                         }
                     }
                 }
             }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 Logger.Warn("Failed to apply background: " + ex.Message, "Background");
+            }
+            finally
+            {
+                if (ReferenceEquals(_backgroundSelectionCts, selection))
+                    _backgroundSelectionCts = null;
+                selection.Dispose();
             }
         }
 
@@ -427,22 +445,46 @@ namespace GenShin_Launcher_Plus.ViewModels
                 App.Current.DataModel.SetSelectedBackgroundId(profile.Id, "");
                 App.Current.DataModel.SetCustomBackground(profile.Id, dialog.FileName);
                 CustomBackgroundPath = dialog.FileName;
+                _backgroundSelectionCts?.Cancel();
 
                 if (BackgroundService.IsVideoFile(dialog.FileName))
                 {
                     string selectedPath = dialog.FileName;
+                    var selection = new CancellationTokenSource();
+                    _backgroundSelectionCts = selection;
                     _ = Task.Run(async () =>
                     {
-                        string playbackPath = await BackgroundService.PreparePlayableVideoAsync(selectedPath, profile.Id, selectedPath);
-                        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                        try
                         {
-                            if (App.Current.DataModel.GetCustomBackground(profile.Id) == selectedPath)
-                                App.Current.ThisMainWindow.SetBackgroundVideo(playbackPath);
-                        });
+                            string playbackPath = await BackgroundService.PreparePlayableVideoAsync(
+                                selectedPath, profile.Id, selectedPath, selection.Token);
+                            selection.Token.ThrowIfCancellationRequested();
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                            {
+                                if (!selection.IsCancellationRequested &&
+                                    App.Current.DataModel.ActiveGame?.Id == profile.Id &&
+                                    App.Current.DataModel.GetCustomBackground(profile.Id) == selectedPath)
+                                    App.Current.ThisMainWindow.SetBackgroundVideo(playbackPath);
+                            });
+                        }
+                        catch (OperationCanceledException) when (selection.IsCancellationRequested) { }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn("Failed to prepare custom background video: " + ex.Message, "Background");
+                        }
+                        finally
+                        {
+                            if (ReferenceEquals(_backgroundSelectionCts, selection))
+                                _backgroundSelectionCts = null;
+                            selection.Dispose();
+                        }
                     });
                 }
                 else
+                {
+                    _backgroundSelectionCts = null;
                     App.Current.ThisMainWindow.SetBackgroundImage(dialog.FileName);
+                }
             }
         }
 
@@ -706,7 +748,8 @@ namespace GenShin_Launcher_Plus.ViewModels
                 if (UseXunkongWallpaper) UseXunkongWallpaper = !UseXunkongWallpaper;
                 return;
             }
-            _ = _mainServiceFactory(App.Current.ThisMainWindow, App.Current.ThisMainWindow.ViewModel);
+            var viewModel = App.Current.ThisMainWindow.ViewModel;
+            _ = viewModel.MainService.MainBackgroundLoadAsync(viewModel);
         }
 
         private void DeleteUser()

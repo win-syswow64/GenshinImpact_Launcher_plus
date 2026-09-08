@@ -6,25 +6,39 @@
              mc:Ignorable="d">
     <!-- The dashboard mirrors Starward's launcher surface: the background remains the hero,
          while actions and information stay inside a readable left-side safe area. -->
-    <Grid Margin="74,34,38,38">
+    <Grid Margin="36,28,30,30">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.RowSpan="3" Width="384" Height="320" HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                Background="#94101824" BorderBrush="#45FFFFFF" BorderThickness="1" CornerRadius="12" ClipToBounds="True">
+        <StackPanel Grid.Row="0" HorizontalAlignment="Left" VerticalAlignment="Top">
+            <TextBlock Text="HOYOPLAY LIBRARY" Foreground="{DynamicResource AccentBrush}" FontSize="11" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding DataContext.CurrentGameDisplayName, RelativeSource={RelativeSource AncestorType=Window}}"
+                       Foreground="White" FontSize="30" FontWeight="SemiBold" Margin="0,5,0,0"/>
+            <StackPanel Orientation="Horizontal" Margin="0,9,0,0">
+                <Border Background="#B526303E" BorderBrush="#35FFFFFF" BorderThickness="1" CornerRadius="12" Padding="11,4">
+                    <TextBlock Text="{Binding DataContext.CurrentServerDisplay, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="#ECFFFFFF" FontSize="11"/>
+                </Border>
+                <Border Background="#B526303E" BorderBrush="#35FFFFFF" BorderThickness="1" CornerRadius="12" Padding="11,4" Margin="8,0,0,0">
+                    <TextBlock Text="{Binding DataContext.VersionStatusText, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="#CFFFFFFF" FontSize="11"/>
+                </Border>
+            </StackPanel>
+        </StackPanel>
+
+        <Border Grid.RowSpan="3" Width="380" Height="310" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                Background="#B0101824" BorderBrush="#45FFFFFF" BorderThickness="1" CornerRadius="16" ClipToBounds="True">
             <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="154"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="150"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <!-- The image layer owns the full fixed banner row; the transparent button only handles its click. -->
                 <Grid Grid.Row="0">
-                    <Border CornerRadius="12,12,0,0">
+                    <Border CornerRadius="16,16,0,0">
                         <Border.Background>
                             <ImageBrush ImageSource="{Binding DataContext.CurrentGameBanner.ImageUrl, RelativeSource={RelativeSource AncestorType=Window}}" Stretch="UniformToFill"/>
                         </Border.Background>
                     </Border>
-                    <Border CornerRadius="12,12,0,0">
+                    <Border CornerRadius="16,16,0,0">
                         <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#00000000" Offset="0.45"/><GradientStop Color="#B0101722" Offset="1"/></LinearGradientBrush></Border.Background>
                     </Border>
                     <Button Background="Transparent" BorderThickness="0" Padding="0"
@@ -33,9 +47,11 @@
                     <TextBlock Text="{Binding DataContext.GameBannerPosition, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="#DFFFFFFF" FontSize="11" Margin="12" VerticalAlignment="Bottom" HorizontalAlignment="Right" IsHitTestVisible="False"/>
                 </Grid>
                 <Button Grid.Row="0" Style="{StaticResource IconButton}" Width="30" Height="30" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0"
-                        Command="{Binding DataContext.PreviousGameBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" Content="&#xE72B;" ToolTip="上一张"/>
+                        Command="{Binding DataContext.PreviousGameBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" Content="&#xE72B;" ToolTip="上一张"
+                        Visibility="{Binding DataContext.HasMultipleBanners, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}"/>
                 <Button Grid.Row="0" Style="{StaticResource IconButton}" Width="30" Height="30" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
-                        Command="{Binding DataContext.NextGameBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" Content="&#xE72A;" ToolTip="下一张"/>
+                        Command="{Binding DataContext.NextGameBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" Content="&#xE72A;" ToolTip="下一张"
+                        Visibility="{Binding DataContext.HasMultipleBanners, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}"/>
 
                 <!-- Dark translucent glass keeps the text readable while retaining the hero artwork behind it. -->
                 <Border Grid.Row="1" Margin="10,8,10,10" Background="#78131D2A" BorderBrush="#45FFFFFF" BorderThickness="1" CornerRadius="9">
@@ -68,6 +84,14 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <Button Grid.Row="1" Background="Transparent" BorderThickness="0" Padding="12"
+                                Command="{Binding DataContext.RefreshGameNewsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Visibility="{Binding DataContext.ShowNewsStatus, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock Text="&#xE895;" FontFamily="{StaticResource IconFont}" Foreground="#AFFFFFFF" FontSize="17" HorizontalAlignment="Center"/>
+                                <TextBlock Text="{Binding DataContext.NewsStatusText, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="#CFFFFFFF" FontSize="11" Margin="0,5,0,0"/>
+                            </StackPanel>
+                        </Button>
                     </Grid>
                 </Border>
             </Grid>
@@ -79,19 +103,27 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
-                <Border Height="48" MinWidth="230" Background="#C83A4656" BorderBrush="#2CFFFFFF" BorderThickness="1" CornerRadius="24" Padding="17,0">
+                <Border Height="48" Width="190" Background="#C83A4656" BorderBrush="#2CFFFFFF" BorderThickness="1" CornerRadius="24" Padding="17,0">
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <TextBlock Text="&#xE77B;" FontFamily="{StaticResource IconFont}" Foreground="#DFFFFFFF" FontSize="15" VerticalAlignment="Center" Margin="0,0,10,0"/>
                         <TextBlock Grid.Column="1" Text="{Binding DataContext.ActiveAccountDisplay, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="White" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                     </Grid>
                 </Border>
-                <Button Style="{StaticResource SecondaryButton}" Height="48" Margin="9,0,0,0" Padding="18,0" Command="{Binding DataContext.NavigateUsersCommand, RelativeSource={RelativeSource AncestorType=Window}}" ToolTip="保存当前账号">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="保存账号"/><TextBlock Text="&#xE70F;" FontFamily="{StaticResource IconFont}" Margin="10,0,0,0"/></StackPanel>
-                </Button>
+                <Button Style="{StaticResource SecondaryButton}" Width="48" Height="48" Padding="0" Margin="8,0,0,0"
+                        Command="{Binding DataContext.NavigateUsersCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        ToolTip="账号管理" Content="&#xE77B;" FontFamily="{StaticResource IconFont}" FontSize="17"/>
+                <Button Style="{StaticResource SecondaryButton}" Width="48" Height="48" Padding="0" Margin="8,0,0,0"
+                        Command="{Binding DataContext.VerifyGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        IsEnabled="{Binding DataContext.CanVerifyGame, RelativeSource={RelativeSource AncestorType=Window}}"
+                        ToolTip="校验游戏资源" Content="&#xE9D9;" FontFamily="{StaticResource IconFont}" FontSize="17"/>
+                <Button Style="{StaticResource SecondaryButton}" Width="48" Height="48" Padding="0" Margin="8,0,0,0"
+                        Command="{Binding DataContext.RepairGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        IsEnabled="{Binding DataContext.CanRepairGame, RelativeSource={RelativeSource AncestorType=Window}}"
+                        ToolTip="修复游戏资源" Content="&#xE90F;" FontFamily="{StaticResource IconFont}" FontSize="17"/>
             </StackPanel>
             <StackPanel Grid.Row="1" HorizontalAlignment="Right">
-                <Border Background="#B826303E" BorderBrush="#29FFFFFF" BorderThickness="1" CornerRadius="12" Padding="13,9" Margin="0,0,0,8"
+                <Border Background="#C226303E" BorderBrush="#35FFFFFF" BorderThickness="1" CornerRadius="16" Padding="14,10" Margin="0,0,0,8"
                         Visibility="{Binding DataContext.ShowProgressPanel, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
                     <StackPanel Width="410">
                         <Grid>
@@ -103,18 +135,18 @@
                         <Grid Margin="0,8,0,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBlock Text="{Binding DataContext.InstallDetailText, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="#CFFFFFFF" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <Button Style="{StaticResource SecondaryButton}" Height="28" Padding="12,0" Margin="0,0,6,0"
-                                        Command="{Binding DataContext.CancelInstallCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        IsEnabled="{Binding DataContext.InstallService.CanPause, RelativeSource={RelativeSource AncestorType=Window}}" Content="暂停" FontSize="11"/>
-                                <Button Style="{StaticResource SecondaryButton}" Height="28" Padding="12,0"
-                                        Command="{Binding DataContext.ContinueInstallCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        IsEnabled="{Binding DataContext.InstallService.CanContinue, RelativeSource={RelativeSource AncestorType=Window}}" Content="继续" FontSize="11"/>
-                            </StackPanel>
+                            <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Height="28" Padding="12,0"
+                                    Command="{Binding DataContext.ToggleInstallPauseCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    IsEnabled="{Binding DataContext.CanToggleInstallPause, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    Content="{Binding DataContext.InstallControlText, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="11"/>
                         </Grid>
                     </StackPanel>
                 </Border>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Style="{StaticResource SecondaryButton}" Width="118" Height="56" Padding="14,0" Margin="0,0,9,0"
+                            Command="{Binding DataContext.PreDownloadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Visibility="{Binding DataContext.ShowPreDownloadButton, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}"
+                            Content="预下载" FontSize="15" FontWeight="SemiBold" ToolTip="提前下载下一版本资源"/>
                     <Button Style="{StaticResource PrimaryButton}" Width="188" Height="56" Margin="0"
                             Command="{Binding DataContext.RunGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             IsEnabled="{Binding DataContext.ActionButtonEnabled, RelativeSource={RelativeSource AncestorType=Window}}"

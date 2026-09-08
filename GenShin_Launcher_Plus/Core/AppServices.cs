@@ -72,8 +72,7 @@ namespace GenShin_Launcher_Plus.Core
             GetRequiredService<IUserDataService>(),
             GetRequiredService<IRegistryService>(),
             GetRequiredService<IUpdateService>(),
-            CreateGameInstallService,
-            CreateMainWindowService);
+            CreateGameInstallService);
 
         private void RegisterSingleton<T>(T service) where T : class
         {

@@ -45,6 +45,12 @@ namespace GenShin_Launcher_Plus
             if (e.ChangedButton != MouseButton.Left || IsInteractiveTopBarElement(e.OriginalSource as DependencyObject))
                 return;
 
+            if (e.ClickCount == 2)
+            {
+                WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+                return;
+            }
+
             try { DragMove(); } catch { }
         }
 

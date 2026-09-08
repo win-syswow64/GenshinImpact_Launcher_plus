@@ -13,20 +13,28 @@ using System.Threading;
 using System.Threading.Tasks;
 using GenShin_Launcher_Plus.Helper;
 using GenShin_Launcher_Plus.Models;
+using GenShin_Launcher_Plus.Models.HoYoPlay;
 using LibVLCSharp.Shared;
 
 namespace GenShin_Launcher_Plus.Service
 {
     /// <summary>
     /// Manages per-game background images/videos.
-    /// Uses correct HoYoPlay API domain, launcher ID, and game ID per server.
+    /// Uses the IP-selected HoYoPlay API domain and the launcher/game IDs for
+    /// each game channel.
     /// </summary>
     public static class BackgroundService
     {
-        private static readonly HttpClient _httpClient = new(new HttpClientHandler
+        private static readonly HttpClient _httpClient = new(new SocketsHttpHandler
         {
-            AutomaticDecompression = System.Net.DecompressionMethods.All
-        });
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            ConnectTimeout = TimeSpan.FromSeconds(5),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+        }) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+
+        private static readonly TimeSpan ApiRequestTimeout = TimeSpan.FromSeconds(8);
+        private static readonly TimeSpan BackgroundDownloadTimeout = TimeSpan.FromMinutes(2);
+        private static readonly SemaphoreSlim VideoConversionSemaphore = new(1, 1);
 
         /// <summary>
         /// In-memory cache for API background responses, keyed by game type (e.g. "genshin").
@@ -54,21 +62,7 @@ namespace GenShin_Launcher_Plus.Service
         /// </summary>
         private static string? GetApiGameId(string gameBiz)
         {
-            return gameBiz switch
-            {
-                "genshin_cn" => "1Z8W5NHUQb",
-                "genshin_global" => "gopR6Cufr3",
-                "genshin_bilibili" => "T2S0Gz4Dr2",
-                "starrail_cn" => "64kMb5iAWu",
-                "starrail_global" => "4ziysqXOQ8",
-                "starrail_bilibili" => "EdtUqXfCHh",
-                "zzz_cn" => "x6znKlJ0xK",
-                "zzz_global" => "U5hbdsT9W7",
-                "zzz_bilibili" => "HXAFlmYa17",
-                "honkai3_cn" => "osvnlOc0S8",
-                "honkai3_global" => "5TIVvvcwtM",
-                _ => null,
-            };
+            return HoYoPlayGameMap.GetApiGameId(gameBiz);
         }
 
         /// <summary>
@@ -77,99 +71,87 @@ namespace GenShin_Launcher_Plus.Service
         /// </summary>
         private static string? GetLauncherId(string gameBiz)
         {
-            return gameBiz switch
-            {
-                "genshin_cn" or "starrail_cn" or "honkai3_cn" or "zzz_cn" => "jGHBHlcOq1",
-                "genshin_global" or "starrail_global" or "honkai3_global" or "zzz_global" => "VYTpXlbWo8",
-                "genshin_bilibili" => "umfgRO5gh5",
-                "starrail_bilibili" => "6P5gHMNyK3",
-                "zzz_bilibili" => "xV0f4r1GT0",
-                _ => null,
-            };
+            return HoYoPlayGameMap.GetLauncherId(gameBiz);
         }
 
         /// <summary>
-        /// Get the API base URL for a GameBiz.
-        /// CN uses mihoyo.com, Global uses hoyoverse.com.
+        /// Resolve an artwork endpoint and the matching launcher/game ids.
+        /// The host and ids form one regional set and must never be mixed.
         /// </summary>
-        private static string GetApiBaseUrl(string gameBiz)
+        private static async ValueTask<(string GameBiz, string BaseUrl)> GetArtworkApiContextAsync(
+            string gameBiz,
+            System.Threading.CancellationToken cancellationToken)
         {
-            // Global servers use hoyoverse.com, CN/bilibili use mihoyo.com
-            if (gameBiz.Contains("_global"))
-                return "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api";
-            return "https://hyp-api.mihoyo.com/hyp/hyp-connect/api";
+            var region = await ApiRegionService.GetCurrentRegionAsync(cancellationToken).ConfigureAwait(false);
+            return (
+                HoYoPlayGameMap.GetRegionalArtworkGameBiz(gameBiz, region.IsChina),
+                HoYoPlayGameMap.GetRegionalArtworkApiBaseUrl(region.IsChina));
         }
 
         /// <summary>
         /// Build the full API URL for getAllGameBasicInfo.
         /// </summary>
-        public static string? BuildApiUrl(string gameBiz)
+        public static async ValueTask<string?> BuildApiUrlAsync(string gameBiz, System.Threading.CancellationToken cancellationToken = default)
         {
-            var launcherId = GetLauncherId(gameBiz);
-            var gameId = GetApiGameId(gameBiz);
+            var context = await GetArtworkApiContextAsync(gameBiz, cancellationToken).ConfigureAwait(false);
+            var launcherId = GetLauncherId(context.GameBiz);
+            var gameId = GetApiGameId(context.GameBiz);
             if (launcherId == null || gameId == null) return null;
-            var baseUrl = GetApiBaseUrl(gameBiz);
-            return $"{baseUrl}/getAllGameBasicInfo?launcher_id={launcherId}&language=zh-cn&game_id={gameId}";
+            return $"{context.BaseUrl}getAllGameBasicInfo?launcher_id={launcherId}&language=zh-cn&game_id={gameId}";
         }
 
         /// <summary>
         /// Build the getGames API URL for fetching poster/display backgrounds.
         /// </summary>
-        public static string? BuildGamesApiUrl(string gameBiz)
+        public static async ValueTask<string?> BuildGamesApiUrlAsync(string gameBiz, System.Threading.CancellationToken cancellationToken = default)
         {
-            var launcherId = GetLauncherId(gameBiz);
+            var context = await GetArtworkApiContextAsync(gameBiz, cancellationToken).ConfigureAwait(false);
+            var launcherId = GetLauncherId(context.GameBiz);
             if (launcherId == null) return null;
-            var baseUrl = GetApiBaseUrl(gameBiz);
-            return $"{baseUrl}/getGames?launcher_id={launcherId}&language=zh-cn";
+            return $"{context.BaseUrl}getGames?launcher_id={launcherId}&language=zh-cn";
         }
 
         /// <summary>
         /// Fetch all available backgrounds for a game from the API.
         /// </summary>
-        public static async Task<List<HoYoGameBackground>> FetchBackgroundsAsync(GameProfile profile, string gameBiz)
+        public static async Task<List<HoYoGameBackground>> FetchBackgroundsAsync(
+            GameProfile profile,
+            string gameBiz,
+            System.Threading.CancellationToken cancellationToken = default)
         {
-            // Check in-memory cache: backgrounds are the same across all servers of a game
-            string gameType = profile.Id; // e.g. "genshin", "starrail"
-            if (_apiCache.TryGetValue(gameType, out var cached) && cached.Expiry > DateTime.UtcNow)
+            var region = await ApiRegionService.GetCurrentRegionAsync(cancellationToken).ConfigureAwait(false);
+            string artworkGameBiz = HoYoPlayGameMap.GetRegionalArtworkGameBiz(gameBiz, region.IsChina);
+            string cacheKey = $"{profile.Id}:{(region.IsChina ? "cn" : "global")}";
+            if (_apiCache.TryGetValue(cacheKey, out var cached) && cached.Expiry > DateTime.UtcNow)
             {
-                Logger.Debug($"Background API cache hit for {gameType} (from {gameBiz})", "Background");
+                Logger.Debug($"Background API cache hit for {cacheKey} (from {gameBiz})", "Background");
                 return cached.Backgrounds;
             }
 
-            var candidates = GetBackgroundApiCandidates(profile.Id, gameBiz);
-            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(12));
-            var tasks = candidates.Select(candidate => FetchBackgroundsFromBizAsync(profile, candidate, cts.Token)).ToList();
-            while (tasks.Count > 0)
+            using var cts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(12));
+            var (_, backgrounds) = await FetchBackgroundsFromBizAsync(
+                profile,
+                artworkGameBiz,
+                cts.Token,
+                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (backgrounds.Count > 0)
             {
-                var completed = await Task.WhenAny(tasks);
-                tasks.Remove(completed);
-                var (biz, backgrounds) = await completed;
-                if (backgrounds.Count > 0)
-                {
-                    cts.Cancel();
-                    _apiCache[gameType] = (backgrounds, DateTime.UtcNow.Add(ApiCacheDuration));
-                    Logger.Debug($"Using background API {biz}; cached {backgrounds.Count} backgrounds for {gameType}", "Background");
-                    return backgrounds;
-                }
+                _apiCache[cacheKey] = (backgrounds, DateTime.UtcNow.Add(ApiCacheDuration));
+                Logger.Debug($"Using background API {artworkGameBiz}; cached {backgrounds.Count} backgrounds for {cacheKey}", "Background");
+                return backgrounds;
             }
 
             Logger.Warn($"No backgrounds found for {gameBiz}", "Background");
             return new List<HoYoGameBackground>();
         }
 
-        private static List<string> GetBackgroundApiCandidates(string gameId, string currentGameBiz)
-        {
-            var candidates = new List<string>
-            {
-                $"{gameId}_cn",
-                $"{gameId}_global",
-            };
-            if (!candidates.Contains(currentGameBiz))
-                candidates.Insert(0, currentGameBiz);
-            return candidates.Where(x => GetApiGameId(x) != null).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        }
-
-        private static async Task<(string Biz, List<HoYoGameBackground> Backgrounds)> FetchBackgroundsFromBizAsync(GameProfile profile, string gameBiz, System.Threading.CancellationToken ct)
+        private static async Task<(string Biz, List<HoYoGameBackground> Backgrounds)> FetchBackgroundsFromBizAsync(
+            GameProfile profile,
+            string gameBiz,
+            System.Threading.CancellationToken ct,
+            System.Threading.CancellationToken callerCancellationToken)
         {
             var result = new List<HoYoGameBackground>();
             var apiGameId = GetApiGameId(gameBiz);
@@ -181,7 +163,7 @@ namespace GenShin_Launcher_Plus.Service
 
             try
             {
-                string? url = BuildApiUrl(gameBiz);
+                string? url = await BuildApiUrlAsync(gameBiz, ct).ConfigureAwait(false);
                 if (url == null) return (gameBiz, result);
 
                 Logger.Debug($"Fetching backgrounds: {url}", "Background");
@@ -225,7 +207,7 @@ namespace GenShin_Launcher_Plus.Service
                 // Also get poster from getGames API
                 try
                 {
-                    string? infoUrl = BuildGamesApiUrl(gameBiz);
+                    string? infoUrl = await BuildGamesApiUrlAsync(gameBiz, ct).ConfigureAwait(false);
                     if (infoUrl != null)
                     {
                         var infoResponse = await GetStringWithUserAgentAsync(infoUrl, ct);
@@ -261,6 +243,10 @@ namespace GenShin_Launcher_Plus.Service
                         }
                     }
                 }
+                catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     Logger.Warn($"Failed to fetch poster: {ex.Message}", "Background");
@@ -270,6 +256,10 @@ namespace GenShin_Launcher_Plus.Service
                 {
                     Logger.Warn($"No backgrounds found for {gameBiz}", "Background");
                 }
+            }
+            catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
@@ -282,11 +272,13 @@ namespace GenShin_Launcher_Plus.Service
 
         private static async Task<string> GetStringWithUserAgentAsync(string url, System.Threading.CancellationToken ct)
         {
+            using var timeout = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(ApiRequestTimeout);
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-            using var response = await _httpClient.SendAsync(request, ct);
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsStringAsync(ct);
+            return await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -302,7 +294,10 @@ namespace GenShin_Launcher_Plus.Service
         /// Download and cache a background file (image or video). Returns local file path.
         /// Validates the download is not empty and uses the correct extension.
         /// </summary>
-        public static async Task<string?> CacheBackgroundFileAsync(string url, string gameId)
+        public static async Task<string?> CacheBackgroundFileAsync(
+            string url,
+            string gameId,
+            System.Threading.CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(url)) return null;
             string folder = Path.Combine(CacheFolder, gameId);
@@ -335,7 +330,9 @@ namespace GenShin_Launcher_Plus.Service
             try
             {
                 Logger.Debug("Downloading: " + url, "Background");
-                var bytes = await _httpClient.GetByteArrayAsync(url);
+                using var timeout = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(BackgroundDownloadTimeout);
+                var bytes = await _httpClient.GetByteArrayAsync(url, timeout.Token).ConfigureAwait(false);
                 if (bytes.Length < 1024)
                 {
                     Logger.Warn("Downloaded file too small (" + bytes.Length + " bytes), skipping", "Background");
@@ -353,11 +350,15 @@ namespace GenShin_Launcher_Plus.Service
                     DeleteFileQuietly(metaPath);
                 }
 
-                await File.WriteAllBytesAsync(filePath, bytes);
+                await File.WriteAllBytesAsync(filePath, bytes, cancellationToken).ConfigureAwait(false);
                 WriteSourceMetadata(metaPath, url);
                 Logger.Debug("Cached: " + filePath + " (" + bytes.Length + " bytes)", "Background");
 
                 return filePath;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -366,8 +367,13 @@ namespace GenShin_Launcher_Plus.Service
             }
         }
 
-        public static async Task<string> PreparePlayableVideoAsync(string sourcePath, string gameId, string? sourceUrl = null)
+        public static async Task<string> PreparePlayableVideoAsync(
+            string sourcePath,
+            string gameId,
+            string? sourceUrl = null,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
                 return sourcePath;
 
@@ -388,28 +394,40 @@ namespace GenShin_Launcher_Plus.Service
             string mp4Path = Path.Combine(cacheFolder, cacheKey + ".mp4");
             string metaPath = GetConvertedVideoMetaPath(mp4Path);
 
-            CleanupConvertedVideoCache(cacheFolder, mp4Path);
-
             if (IsConvertedVideoFresh(mp4Path, metaPath, sourceStamp))
             {
                 Logger.Debug("MP4 video cache hit: " + mp4Path, "BG");
                 return mp4Path;
             }
 
-            DeleteFileQuietly(mp4Path);
-            DeleteFileQuietly(metaPath);
-
-            Logger.Debug("Converting background video to MP4: " + sourcePath, "BG");
-            bool converted = await TryConvertVideoToMp4Async(sourcePath, mp4Path).ConfigureAwait(false);
-            if (!converted)
+            await VideoConversionSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                Logger.Warn("MP4 conversion failed, using original video: " + sourcePath, "BG");
-                return sourcePath;
-            }
+                // Another caller may have completed this conversion while we
+                // waited for the shared converter.
+                if (IsConvertedVideoFresh(mp4Path, metaPath, sourceStamp))
+                    return mp4Path;
 
-            WriteJsonFile(metaPath, ConvertedVideoMetadata.FromStamp(sourceStamp));
-            Logger.Debug("MP4 video cache ready: " + mp4Path, "BG");
-            return mp4Path;
+                CleanupConvertedVideoCache(cacheFolder, mp4Path);
+                DeleteFileQuietly(mp4Path);
+                DeleteFileQuietly(metaPath);
+
+                Logger.Debug("Converting background video to MP4: " + sourcePath, "BG");
+                bool converted = await TryConvertVideoToMp4Async(sourcePath, mp4Path, cancellationToken).ConfigureAwait(false);
+                if (!converted)
+                {
+                    Logger.Warn("MP4 conversion failed, using original video: " + sourcePath, "BG");
+                    return sourcePath;
+                }
+
+                WriteJsonFile(metaPath, ConvertedVideoMetadata.FromStamp(sourceStamp));
+                Logger.Debug("MP4 video cache ready: " + mp4Path, "BG");
+                return mp4Path;
+            }
+            finally
+            {
+                VideoConversionSemaphore.Release();
+            }
         }
 
         public static void CleanupUnusedBackgroundCache(string gameId, IEnumerable<string?> keepFiles)
@@ -446,7 +464,10 @@ namespace GenShin_Launcher_Plus.Service
             CleanupConvertedVideoCache(GetVideoCacheFolder(gameId), keep);
         }
 
-        private static async Task<bool> TryConvertVideoToMp4Async(string sourcePath, string mp4Path)
+        private static async Task<bool> TryConvertVideoToMp4Async(
+            string sourcePath,
+            string mp4Path,
+            CancellationToken cancellationToken)
         {
             string? dir = Path.GetDirectoryName(mp4Path);
             if (string.IsNullOrEmpty(dir)) return false;
@@ -455,14 +476,15 @@ namespace GenShin_Launcher_Plus.Service
             string tempPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(mp4Path) + ".tmp.mp4");
             DeleteFileQuietly(tempPath);
 
-            if (await TryConvertWithFfmpegAsync(sourcePath, tempPath).ConfigureAwait(false))
+            if (await TryConvertWithFfmpegAsync(sourcePath, tempPath, cancellationToken).ConfigureAwait(false))
             {
                 ReplaceFile(tempPath, mp4Path);
                 return IsUsableMediaFile(mp4Path);
             }
 
             DeleteFileQuietly(tempPath);
-            if (await TryConvertWithLibVlcAsync(sourcePath, tempPath).ConfigureAwait(false))
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await TryConvertWithLibVlcAsync(sourcePath, tempPath, cancellationToken).ConfigureAwait(false))
             {
                 ReplaceFile(tempPath, mp4Path);
                 return IsUsableMediaFile(mp4Path);
@@ -472,7 +494,10 @@ namespace GenShin_Launcher_Plus.Service
             return false;
         }
 
-        private static async Task<bool> TryConvertWithFfmpegAsync(string sourcePath, string tempPath)
+        private static async Task<bool> TryConvertWithFfmpegAsync(
+            string sourcePath,
+            string tempPath,
+            CancellationToken cancellationToken)
         {
             string? ffmpeg = FindFfmpegExecutable();
             if (ffmpeg == null) return false;
@@ -513,8 +538,18 @@ namespace GenShin_Launcher_Plus.Service
 
                 var stdOutTask = process.StandardOutput.ReadToEndAsync();
                 var stdErrTask = process.StandardError.ReadToEndAsync();
-                var waitTask = process.WaitForExitAsync();
-                if (await Task.WhenAny(waitTask, Task.Delay(VideoConvertTimeout)).ConfigureAwait(false) != waitTask)
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(VideoConvertTimeout);
+                try
+                {
+                    await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    TryKillProcess(process);
+                    throw;
+                }
+                catch (OperationCanceledException)
                 {
                     TryKillProcess(process);
                     Logger.Warn("ffmpeg conversion timeout", "BG");
@@ -531,6 +566,10 @@ namespace GenShin_Launcher_Plus.Service
 
                 return IsUsableMediaFile(tempPath);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 Logger.Warn("ffmpeg conversion exception: " + ex.Message, "BG");
@@ -538,7 +577,10 @@ namespace GenShin_Launcher_Plus.Service
             }
         }
 
-        private static async Task<bool> TryConvertWithLibVlcAsync(string sourcePath, string tempPath)
+        private static async Task<bool> TryConvertWithLibVlcAsync(
+            string sourcePath,
+            string tempPath,
+            CancellationToken cancellationToken)
         {
             try
             {
@@ -560,13 +602,22 @@ namespace GenShin_Launcher_Plus.Service
                     if (!player.Play(media))
                         return false;
 
-                    if (await Task.WhenAny(tcs.Task, Task.Delay(VideoConvertTimeout)).ConfigureAwait(false) != tcs.Task)
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(VideoConvertTimeout);
+                    try
+                    {
+                        bool converted = await tcs.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
+                        return converted && IsUsableMediaFile(tempPath);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (OperationCanceledException)
                     {
                         Logger.Warn("LibVLC conversion timeout", "BG");
                         return false;
                     }
-
-                    return await tcs.Task.ConfigureAwait(false) && IsUsableMediaFile(tempPath);
                 }
                 finally
                 {
@@ -574,6 +625,10 @@ namespace GenShin_Launcher_Plus.Service
                     player.EncounteredError -= error;
                     try { player.Stop(); } catch { }
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {

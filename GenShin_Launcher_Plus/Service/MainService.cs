@@ -1,5 +1,7 @@
 ﻿using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
 using GenShin_Launcher_Plus.Helper;
@@ -14,13 +16,30 @@ namespace GenShin_Launcher_Plus.Service
     public class MainService : IMainWindowService
     {
         private static readonly System.Threading.SemaphoreSlim _bgSemaphore = new(1, 1);
+        private static readonly object _backgroundCancellationLock = new();
+        private static CancellationTokenSource? _backgroundLoadCts;
+        private static long _backgroundLoadGeneration;
         private readonly ILauncherSession _session;
 
         public MainService(ILauncherSession session, MainWindow main, MainWindowViewModel vm)
         {
             _session = session;
-            CheckConfig(main);
-            _ = MainBackgroundLoadAsync(vm);
+            _ = InitializeAsync(main, vm);
+        }
+
+        private async Task InitializeAsync(MainWindow main, MainWindowViewModel vm)
+        {
+            try
+            {
+                bool pathsChanged = await CheckConfigAsync(main);
+                if (pathsChanged)
+                    vm.RefreshGameSelector(reloadBackground: false);
+                await MainBackgroundLoadAsync(vm);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Launcher initialization failed: " + ex.Message, "Main");
+            }
         }
 
         public async Task CheckNotice()
@@ -32,11 +51,16 @@ namespace GenShin_Launcher_Plus.Service
 
         public async Task MainBackgroundLoadAsync(MainWindowViewModel vm)
         {
+            long generation = Interlocked.Increment(ref _backgroundLoadGeneration);
             _session.IsLoadingBackground = true;
             Logger.Debug("Loading background", "Main");
             try
             {
                 await LoadGameBackgroundAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Debug("Background load canceled", "Background");
             }
             catch (Exception ex)
             {
@@ -48,30 +72,50 @@ namespace GenShin_Launcher_Plus.Service
                         "pack://application:,,,/Images/MainBackground.jpg");
                 });
             }
-            _session.IsLoadingBackground = false;
+            finally
+            {
+                // A canceled predecessor must not hide the loading state of
+                // the newer request that replaced it.
+                if (Volatile.Read(ref _backgroundLoadGeneration) == generation)
+                    _session.IsLoadingBackground = false;
+            }
         }
 
-        public async Task LoadGameBackgroundAsync()
+        public async Task LoadGameBackgroundAsync(CancellationToken cancellationToken = default)
         {
-            // Wait for any in-progress load to finish, then proceed.
-            // Timeout prevents deadlock if the previous load is stuck.
-            var entered = await _bgSemaphore.WaitAsync(TimeSpan.FromSeconds(10));
-            if (!entered)
+            CancellationTokenSource loadCts;
+            lock (_backgroundCancellationLock)
             {
-                Logger.Warn("BG semaphore timeout, skip stale load", "BG");
-                return;
+                _backgroundLoadCts?.Cancel();
+                loadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                _backgroundLoadCts = loadCts;
             }
+
+            var entered = false;
             try
             {
-                await LoadGameBackgroundCoreAsync();
+                // The newest request cancels the old conversion/download and
+                // then waits for it to release the shared coordinator. Never
+                // discard the newest background request on an arbitrary wait.
+                await _bgSemaphore.WaitAsync(loadCts.Token);
+                entered = true;
+
+                await LoadGameBackgroundCoreAsync(loadCts.Token);
             }
             finally
             {
-                _bgSemaphore.Release();
+                if (entered)
+                    _bgSemaphore.Release();
+                lock (_backgroundCancellationLock)
+                {
+                    if (ReferenceEquals(_backgroundLoadCts, loadCts))
+                        _backgroundLoadCts = null;
+                }
+                loadCts.Dispose();
             }
         }
 
-        private async Task LoadGameBackgroundCoreAsync()
+        private async Task LoadGameBackgroundCoreAsync(CancellationToken cancellationToken)
         {
             var main = _session.MainWindow;
             if (main == null) { Logger.Debug("main is null, skip", "BG"); return; }
@@ -93,7 +137,7 @@ namespace GenShin_Launcher_Plus.Service
                 if (!IsStillActive()) return;
                 if (BackgroundService.IsVideoFile(customBg))
                 {
-                    var playable = await BackgroundService.PreparePlayableVideoAsync(customBg, profile.Id, customBg);
+                    var playable = await BackgroundService.PreparePlayableVideoAsync(customBg, profile.Id, customBg, cancellationToken);
                     if (!IsStillActive()) return;
                     System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(playable));
                 }
@@ -110,7 +154,7 @@ namespace GenShin_Launcher_Plus.Service
                 if (!IsStillActive()) return;
                 if (BackgroundService.IsVideoFile(legacyBg))
                 {
-                    var playable = await BackgroundService.PreparePlayableVideoAsync(legacyBg, profile.Id, legacyBg);
+                    var playable = await BackgroundService.PreparePlayableVideoAsync(legacyBg, profile.Id, legacyBg, cancellationToken);
                     if (!IsStillActive()) return;
                     System.Windows.Application.Current.Dispatcher.Invoke(() => main.SetBackgroundVideo(playable));
                 }
@@ -121,7 +165,7 @@ namespace GenShin_Launcher_Plus.Service
 
             // 3. API backgrounds
             Logger.Debug("Fetching API backgrounds...", "BG");
-            var allBgs = await BackgroundService.FetchBackgroundsAsync(profile, loadGameBiz);
+            var allBgs = await BackgroundService.FetchBackgroundsAsync(profile, loadGameBiz, cancellationToken);
             if (!IsStillActive()) return;
             Logger.Debug("Fetched " + allBgs.Count + " backgrounds from API", "BG");
 
@@ -145,7 +189,11 @@ namespace GenShin_Launcher_Plus.Service
             // Try to cache and display each background in order
             string? cacheFile = null;
             HoYoGameBackground? selected = null;
-            foreach (var bg in allBgs)
+            string preferredBackgroundId = _session.Data.GetSelectedBackgroundId(profile.Id);
+            var orderedBackgrounds = allBgs
+                .OrderByDescending(bg => !string.IsNullOrWhiteSpace(preferredBackgroundId) && bg.Id == preferredBackgroundId)
+                .ToList();
+            foreach (var bg in orderedBackgrounds)
             {
                 string? url = bg.IsVideo ? bg.Video?.Url : bg.Background?.Url;
                 if (string.IsNullOrEmpty(url) || url.StartsWith("pack:"))
@@ -154,7 +202,7 @@ namespace GenShin_Launcher_Plus.Service
                     continue;
                 }
                 Logger.Debug("  trying bg id=" + bg.Id + " url=" + url, "BG");
-                cacheFile = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id);
+                cacheFile = await BackgroundService.CacheBackgroundFileAsync(url, profile.Id, cancellationToken);
                 if (!IsStillActive()) return;
                 if (cacheFile != null)
                 {
@@ -180,14 +228,14 @@ namespace GenShin_Launcher_Plus.Service
                 // Cache the theme overlay (for video overlay)
                 string? themePath = null;
                 if (selected.Theme != null && !string.IsNullOrEmpty(selected.Theme.Url))
-                    themePath = await BackgroundService.CacheBackgroundFileAsync(selected.Theme.Url, profile.Id);
+                    themePath = await BackgroundService.CacheBackgroundFileAsync(selected.Theme.Url, profile.Id, cancellationToken);
                 if (!IsStillActive()) return;
                 // Cache the static fallback image (for when video can't play, e.g. WebM)
                 string? fallbackPath = null;
                 if (selected.Background != null && !string.IsNullOrEmpty(selected.Background.Url))
-                    fallbackPath = await BackgroundService.CacheBackgroundFileAsync(selected.Background.Url, profile.Id);
+                    fallbackPath = await BackgroundService.CacheBackgroundFileAsync(selected.Background.Url, profile.Id, cancellationToken);
                 if (!IsStillActive()) return;
-                string playbackPath = await BackgroundService.PreparePlayableVideoAsync(cacheFile, profile.Id, selected.Video?.Url);
+                string playbackPath = await BackgroundService.PreparePlayableVideoAsync(cacheFile, profile.Id, selected.Video?.Url, cancellationToken);
                 if (!IsStillActive()) return;
                 Logger.Debug("Setting VIDEO bg: video=" + playbackPath + " source=" + cacheFile + " theme=" + themePath + " fallback=" + fallbackPath, "BG");
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
@@ -209,36 +257,121 @@ namespace GenShin_Launcher_Plus.Service
             Logger.Debug("Background loaded OK: " + selected.Id, "BG");
         }
 
-        public void CheckConfig(MainWindow main)
+        public async Task<bool> CheckConfigAsync(MainWindow main)
         {
             if (!Directory.Exists("UserData"))
                 Directory.CreateDirectory("UserData");
 
+            // Snapshot configuration on the UI thread. Registry and directory
+            // enumeration then runs in the background without touching the
+            // non-thread-safe INI parser.
+            var inputs = GameProfiles.All
+                .SelectMany(profile => profile.GetSupportedServers().Select(biz => new GamePathScanInput(
+                    profile,
+                    biz,
+                    _session.Data.GetExactGamePath(biz.Value),
+                    _session.Data.GetGamePath(biz.Value))))
+                .ToList();
+
+            var repairs = await Task.Run(() => ScanGamePaths(inputs));
             bool changed = false;
-            // Discover every supported GameBiz, not merely the game that was
-            // active when the launcher started. Each hit is stored against its
-            // own server-specific path, matching Starward's independent game
-            // entries and preventing a first-game-only scan result.
-            foreach (var profile in GameProfiles.All)
+            foreach (var repair in repairs)
             {
-                foreach (var biz in profile.GetSupportedServers())
-                {
-                    var configuredPath = _session.Data.GetExactGamePath(biz.Value);
-                    if (!string.IsNullOrWhiteSpace(configuredPath) &&
-                        File.Exists(Path.Combine(configuredPath, profile.GetExeName(biz))))
-                        continue;
+                // Do not overwrite a path the user changed while scanning.
+                string current = _session.Data.GetExactGamePath(repair.Biz.Value);
+                if (!PathsEqual(current, repair.OriginalPath))
+                    continue;
 
-                    var found = GameSearchService.FindGame(profile, biz.Server);
-                    if (found == null) continue;
-
-                    Logger.Info($"Auto-found game path: {found.Path} ({biz})", "Main");
-                    _session.Data.SetGamePath(biz.Value, found.Path);
-                    changed = true;
-                }
+                _session.Data.SetGamePath(repair.Biz.Value, repair.NewPath ?? string.Empty);
+                Logger.Info(string.IsNullOrWhiteSpace(repair.NewPath)
+                    ? $"Removed invalid cross-server path for {repair.Biz}: {repair.OriginalPath}"
+                    : $"Auto-found game path: {repair.NewPath} ({repair.Biz})", "Main");
+                changed = true;
             }
-
-            if (changed)
-                _session.Data.SaveDataToFile();
+            return changed;
         }
+
+        private static List<GamePathRepair> ScanGamePaths(IReadOnlyList<GamePathScanInput> inputs)
+        {
+            var repairs = new List<GamePathRepair>();
+            foreach (var input in inputs)
+            {
+                if (!string.IsNullOrWhiteSpace(input.ExactPath) &&
+                    GameStateService.IsGameInstalled(
+                        input.ExactPath,
+                        input.Profile,
+                        input.Biz,
+                        trustExplicitPath: true))
+                    continue;
+
+                // FindGame can carry a trusted per-biz registry hint even when
+                // a same-name client has an incomplete config.ini.
+                var foundPath = GameSearchService.FindGame(input.Profile, input.Biz.Server)?.Path;
+                if (string.IsNullOrWhiteSpace(foundPath))
+                {
+                    var candidates = GameInstallService.GetKnownGamePathCandidates(
+                        input.Profile,
+                        input.Biz.Server,
+                        new[] { input.ExactPath, input.FallbackPath });
+                    foundPath = candidates.FirstOrDefault(path =>
+                        GameStateService.IsGameInstalled(path, input.Profile, input.Biz));
+                }
+                if (!string.IsNullOrWhiteSpace(foundPath))
+                {
+                    if (!PathsEqual(foundPath, input.ExactPath))
+                        repairs.Add(new GamePathRepair(input.Biz, input.ExactPath, foundPath));
+                    continue;
+                }
+
+                // Clear an online path that visibly belongs to another server,
+                // but retain unavailable external-drive paths.
+                if (!string.IsNullOrWhiteSpace(input.ExactPath) &&
+                    Directory.Exists(input.ExactPath) &&
+                    IsConfirmedDifferentServer(input.ExactPath, input.Profile, input.Biz))
+                    repairs.Add(new GamePathRepair(input.Biz, input.ExactPath, string.Empty));
+            }
+            return repairs;
+        }
+
+        private static bool IsConfirmedDifferentServer(string path, GameProfile profile, GameBiz expectedBiz)
+        {
+            var detectedServer = GameSearchService.DetectServerFromConfig(path);
+            if (!string.IsNullOrWhiteSpace(detectedServer))
+                return !string.Equals(detectedServer, expectedBiz.Server, StringComparison.OrdinalIgnoreCase);
+
+            // When executable names differ they can prove CN/global.  A
+            // same-name executable cannot prove a server and must not cause
+            // an explicitly configured legacy path to be deleted.
+            if (string.Equals(profile.CnExeName, profile.GlobalExeName, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            bool hasCnExe = File.Exists(Path.Combine(path, profile.CnExeName));
+            bool hasGlobalExe = File.Exists(Path.Combine(path, profile.GlobalExeName));
+            return expectedBiz.IsGlobalServer()
+                ? hasCnExe && !hasGlobalExe
+                : hasGlobalExe && !hasCnExe;
+        }
+
+        private static bool PathsEqual(string? left, string? right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+                return string.IsNullOrWhiteSpace(left) && string.IsNullOrWhiteSpace(right);
+            try
+            {
+                return string.Equals(
+                    Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return string.Equals(left, right, StringComparison.OrdinalIgnoreCase); }
+        }
+
+        private sealed record GamePathScanInput(
+            GameProfile Profile,
+            GameBiz Biz,
+            string? ExactPath,
+            string? FallbackPath);
+
+        private sealed record GamePathRepair(GameBiz Biz, string? OriginalPath, string? NewPath);
     }
 }

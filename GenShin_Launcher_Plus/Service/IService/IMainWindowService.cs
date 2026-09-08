@@ -1,13 +1,14 @@
 ﻿using System.Threading.Tasks;
 using GenShin_Launcher_Plus.ViewModels;
+using System.Threading;
 
 namespace GenShin_Launcher_Plus.Service.IService
 {
     public interface IMainWindowService
     {
-        void CheckConfig(MainWindow main);
+        Task<bool> CheckConfigAsync(MainWindow main);
         Task MainBackgroundLoadAsync(MainWindowViewModel vm);
-        Task LoadGameBackgroundAsync();
+        Task LoadGameBackgroundAsync(CancellationToken cancellationToken = default);
         Task CheckNotice();
     }
 }

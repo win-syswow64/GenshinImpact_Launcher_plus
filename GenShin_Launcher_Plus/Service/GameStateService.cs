@@ -39,7 +39,11 @@ public static class GameStateService
     /// <summary>
     /// Check if the game exe exists in the install path
     /// </summary>
-    public static bool IsGameInstalled(string installPath, GameProfile profile, GameBiz biz)
+    public static bool IsGameInstalled(
+        string installPath,
+        GameProfile profile,
+        GameBiz biz,
+        bool trustExplicitPath = false)
     {
         if (string.IsNullOrEmpty(installPath) || !Directory.Exists(installPath))
             return false;
@@ -47,8 +51,30 @@ public static class GameStateService
         if (!string.IsNullOrEmpty(detectedServer) &&
             !string.Equals(detectedServer, biz.Server, StringComparison.OrdinalIgnoreCase))
             return false;
+        if (!trustExplicitPath && string.IsNullOrEmpty(detectedServer) &&
+            (string.Equals(profile.CnExeName, profile.GlobalExeName, StringComparison.OrdinalIgnoreCase) || biz.IsBilibili()))
+        {
+            // A same-name executable cannot distinguish CN/global, and the
+            // CN executable alone cannot distinguish official/Bilibili. A
+            // matching per-biz HoYoPlay registry entry remains authoritative.
+            var registered = GameSearchService.FindGame(profile, biz.Server);
+            if (registered == null || !PathsEqual(installPath, registered.Path))
+                return false;
+        }
         var exe = profile.GetExeName(biz);
         return File.Exists(Path.Combine(installPath, exe));
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     /// <summary>
@@ -68,7 +94,15 @@ public static class GameStateService
         // fallback can belong to a different server client.
         var installPath = data.GetExactGamePath(gameBiz);
         info.InstallPath = installPath;
-        info.IsInstalled = IsGameInstalled(installPath, profile, new GameBiz(gameBiz));
+        // This is the path stored explicitly for this GameBiz.  An older or
+        // manually selected hard-link directory may not contain channel
+        // metadata, so trust the mapping while still rejecting a positively
+        // detected server mismatch and requiring the expected executable.
+        info.IsInstalled = IsGameInstalled(
+            installPath,
+            profile,
+            new GameBiz(gameBiz),
+            trustExplicitPath: true);
         info.LocalVersion = GetLocalVersion(installPath);
 
         if (!info.IsInstalled)

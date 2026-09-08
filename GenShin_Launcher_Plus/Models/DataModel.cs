@@ -24,26 +24,8 @@ namespace GenShin_Launcher_Plus.Core
             string game = parser.GetSetting("setup", "SelectedGame", 0);
             if (string.IsNullOrEmpty(game)) game = "genshin";
 
-            // Read cps from the game's Config.ini to determine old server
             string gamePath = parser.GetSetting("setup", "GamePath", 0);
-            string cps = "mihoyo";
-            if (!string.IsNullOrEmpty(gamePath))
-            {
-                string configIni = Path.Combine(gamePath, "Config.ini");
-                if (File.Exists(configIni))
-                {
-                    var gp = new IniParser(configIni);
-                    cps = gp.GetSetting("General", "cps", 0) ?? "mihoyo";
-                }
-            }
-
-            string biz;
-            if (cps.Contains("bilibili", StringComparison.OrdinalIgnoreCase))
-                biz = $"{game}_bilibili";
-            else if (cps.Contains("hoyoverse", StringComparison.OrdinalIgnoreCase))
-                biz = $"{game}_global";
-            else
-                biz = $"{game}_cn";
+            string biz = $"{game}_{DetectLegacyServer(gamePath)}";
 
             parser.AddSetting("setup", "ActiveGameBiz", biz);
 
@@ -61,14 +43,29 @@ namespace GenShin_Launcher_Plus.Core
                 string path = parser.GetSetting(profile.Id, "GamePath", 0);
                 if (!string.IsNullOrEmpty(path))
                 {
-                    parser.AddSetting($"{profile.Id}_cn", "GamePath", path);
-                    parser.AddSetting($"{profile.Id}_global", "GamePath", path);
-                    if (profile.BilibiliSdkPath != null)
-                        parser.AddSetting($"{profile.Id}_bilibili", "GamePath", path);
+                    // One physical client belongs to one server. Separate
+                    // hard-linked clients still have separate root paths.
+                    parser.AddSetting($"{profile.Id}_{DetectLegacyServer(path)}", "GamePath", path);
                 }
             }
 
             parser.SaveSettings();
+        }
+
+        private static string DetectLegacyServer(string? gamePath)
+        {
+            if (string.IsNullOrWhiteSpace(gamePath)) return "cn";
+            try
+            {
+                string configIni = Path.Combine(gamePath, "Config.ini");
+                if (!File.Exists(configIni)) return "cn";
+                var gameConfig = new IniParser(configIni);
+                string cps = gameConfig.GetSetting("General", "cps", 0) ?? "mihoyo";
+                if (cps.Contains("bilibili", StringComparison.OrdinalIgnoreCase)) return "bilibili";
+                if (cps.Contains("hoyoverse", StringComparison.OrdinalIgnoreCase)) return "global";
+            }
+            catch { }
+            return "cn";
         }
 
         // === Language ===

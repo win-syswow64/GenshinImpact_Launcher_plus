@@ -43,12 +43,14 @@
 
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="{Binding SidebarWidth}"/>
+                    <!-- Keep the page width stable; the expanded navigation is an overlay pane. -->
+                    <ColumnDefinition Width="70"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Compact navigation, based on Starward's left-compact navigation mode. -->
-                <Border x:Name="Sidebar" Grid.Column="0" Background="#DC101721" BorderBrush="#22FFFFFF" BorderThickness="0,0,1,0">
+                <Border x:Name="Sidebar" Grid.Column="0" Width="{Binding SidebarWidth}" HorizontalAlignment="Left"
+                        Panel.ZIndex="20" Background="#EE0D141E" BorderBrush="#2DFFFFFF" BorderThickness="0,0,1,0">
                     <Border.Resources>
                         <Style x:Key="SidebarNavigationButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
                             <Setter Property="Width" Value="{Binding SidebarButtonWidth}"/>
@@ -126,7 +128,7 @@
                                     <TextBlock Text="{Binding ProgramVersionText}" Foreground="#9DFFFFFF" FontSize="11" Margin="0,2,0,0"/>
                                 </StackPanel>
                             </StackPanel>
-                            <ListBox Grid.Column="1" ItemsSource="{Binding GameList}" SelectedIndex="{Binding SelectedGameIndex}" Background="Transparent" BorderThickness="0"
+                            <ListBox Grid.Column="1" ItemsSource="{Binding GameList}" SelectedIndex="{Binding SelectedGameIndex}" IsEnabled="{Binding CanChangeGameSelection}" Background="Transparent" BorderThickness="0"
                                      HorizontalAlignment="Left" VerticalAlignment="Center" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
                                 <ListBox.ItemsPanel>
                                     <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
@@ -163,8 +165,9 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                <ComboBox ItemsSource="{Binding ServerDisplayNames}" SelectedIndex="{Binding SelectedServerIndex}" Style="{StaticResource DarkComboBox}" Foreground="White" MinWidth="104" Height="32" FontSize="12" Margin="0,0,12,0"/>
+                                <ComboBox ItemsSource="{Binding ServerDisplayNames}" SelectedIndex="{Binding SelectedServerIndex}" IsEnabled="{Binding CanChangeGameSelection}" Style="{StaticResource DarkComboBox}" Foreground="White" MinWidth="104" Height="32" FontSize="12" Margin="0,0,12,0"/>
                                 <Button Style="{StaticResource IconButton}" Width="34" Height="34" Command="{Binding MainMinimizedCommand}" ToolTip="{Binding languages.MinimizeToolTip}" Content="&#xE949;"/>
+                                <Button Style="{StaticResource IconButton}" Width="34" Height="34" Command="{Binding MainMaximizedCommand}" ToolTip="最大化或还原" Content="&#xE922;"/>
                                 <Button Style="{StaticResource IconButton}" Width="34" Height="34" Command="{Binding ExitProgramCommand}" ToolTip="{Binding languages.CloseToolTip}" Content="&#xE8BB;"/>
                             </StackPanel>
                         </Grid>

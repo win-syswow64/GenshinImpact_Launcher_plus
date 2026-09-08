@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.Win32;
 using GenShin_Launcher_Plus.Models;
 
@@ -35,28 +36,48 @@ namespace GenShin_Launcher_Plus.Service
             => FindGame(profile, server)?.Path;
 
         public static GameSearchResult? FindGame(GameProfile profile, string preferredServer, bool allowDifferentServer = false)
+            => FindGames(profile, preferredServer, allowDifferentServer).FirstOrDefault();
+
+        /// <summary>
+        /// Enumerate every usable candidate instead of validating only the
+        /// first directory containing a same-named executable. Several HoYo
+        /// games use the same exe name for CN and global clients, which is
+        /// especially common in sibling directories backed by hard links.
+        /// </summary>
+        public static IReadOnlyList<GameSearchResult> FindGames(
+            GameProfile profile,
+            string preferredServer,
+            bool allowDifferentServer = false)
         {
-            // 1. HYP per-game registry (new launcher, may not exist)
-            string? path = TryHypRegistry(profile.Id, preferredServer);
-            var result = Validate(path, profile, preferredServer, allowDifferentServer);
-            if (result != null) return result;
+            var candidates = new List<(string? Path, string? TrustedServerHint)>
+            {
+                // A per-biz HoYoPlay registry key is an authoritative hint.
+                (TryHypRegistry(profile.Id, preferredServer), preferredServer),
+            };
+            candidates.AddRange(TryLauncherGames(profile, preferredServer).Select(path => ((string?)path, (string?)null)));
+            // The legacy global registry is distinct; CN and Bilibili often
+            // share keys and therefore still require config/path evidence.
+            candidates.Add((TryGameConfigRegistry(profile, preferredServer),
+                preferredServer == "global" ? "global" : null));
+            candidates.AddRange(TryCommonPaths(profile, preferredServer).Select(path => ((string?)path, (string?)null)));
 
-            // 2. Launcher directories from Uninstall registry -> scan games/
-            path = TryLauncherGames(profile, preferredServer);
-            result = Validate(path, profile, preferredServer, allowDifferentServer);
-            if (result != null) return result;
-
-            // 3. Old game-config registry keys (GameProfile.CnRegistryKey etc.)
-            path = TryGameConfigRegistry(profile, preferredServer);
-            result = Validate(path, profile, preferredServer, allowDifferentServer);
-            if (result != null) return result;
-
-            // 4. Common brute-force paths
-            path = TryCommonPaths(profile, preferredServer);
-            result = Validate(path, profile, preferredServer, allowDifferentServer);
-            if (result != null) return result;
-
-            return null;
+            var results = new List<GameSearchResult>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var candidate in candidates)
+            {
+                var result = Validate(candidate.Path, profile, preferredServer, allowDifferentServer, candidate.TrustedServerHint);
+                if (result == null) continue;
+                string normalized;
+                try
+                {
+                    normalized = Path.GetFullPath(result.Path)
+                        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                }
+                catch { continue; }
+                if (seen.Add(normalized))
+                    results.Add(result with { Path = normalized });
+            }
+            return results;
         }
 
         // ---------- 1. HYP per-game registry ----------
@@ -79,8 +100,9 @@ namespace GenShin_Launcher_Plus.Service
         }
 
         // ---------- 2. Scan launcher games/ directories ----------
-        static string? TryLauncherGames(GameProfile profile, string server)
+        static List<string> TryLauncherGames(GameProfile profile, string server)
         {
+            var results = new List<string>();
             try
             {
                 var launcherDirs = FindLauncherDirectories();
@@ -97,19 +119,20 @@ namespace GenShin_Launcher_Plus.Service
                     {
                         string candidate = Path.Combine(gamesDir, $"{hint} Game");
                         if (File.Exists(Path.Combine(candidate, exeName)))
-                            return candidate;
+                            results.Add(candidate);
                     }
 
-                    // Brute-force: scan every subfolder for the exe
+                    // Keep scanning after a same-name client from a different
+                    // server. Validation happens for every candidate later.
                     foreach (var dir in Directory.GetDirectories(gamesDir))
                     {
                         if (File.Exists(Path.Combine(dir, exeName)))
-                            return dir;
+                            results.Add(dir);
                     }
                 }
             }
             catch { }
-            return null;
+            return results;
         }
 
         /// <summary>
@@ -179,8 +202,9 @@ namespace GenShin_Launcher_Plus.Service
         }
 
         // ---------- 4. Common paths ----------
-        static string? TryCommonPaths(GameProfile profile, string server)
+        static List<string> TryCommonPaths(GameProfile profile, string server)
         {
+            var results = new List<string>();
             string exe = server is "cn" or "bilibili" ? profile.CnExeName : profile.GlobalExeName;
             string[] drives = { @"C:", @"D:", @"E:", @"F:" };
             string[] roots =
@@ -197,32 +221,60 @@ namespace GenShin_Launcher_Plus.Service
                 profile.Id,
                 Path.GetFileNameWithoutExtension(exe),
                 $"{ToFolderHint(profile.Id)} Game",
+                $"{profile.DisplayName} ({server})",
+                $"{ToFolderHint(profile.Id)} ({server})",
             };
             foreach (var d in drives)
                 foreach (var r in roots)
                     foreach (var n in names)
                     {
                         var p = Path.Combine(d, r, n);
-                        if (File.Exists(Path.Combine(p, exe))) return p;
+                        if (File.Exists(Path.Combine(p, exe))) results.Add(p);
                     }
-            return null;
+            return results;
         }
 
-        static GameSearchResult? Validate(string? path, GameProfile profile, string preferredServer, bool allowDifferentServer)
+        static GameSearchResult? Validate(
+            string? path,
+            GameProfile profile,
+            string preferredServer,
+            bool allowDifferentServer,
+            string? trustedServerHint)
         {
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return null;
+            bool cnExe = File.Exists(Path.Combine(path, profile.CnExeName));
+            bool globalExe = File.Exists(Path.Combine(path, profile.GlobalExeName));
+            if (!cnExe && !globalExe) return null;
 
-            var detectedServer = DetectServerFromConfig(path) ?? preferredServer;
+            var detectedServer = DetectServerFromConfig(path) ?? trustedServerHint;
+            if (string.IsNullOrWhiteSpace(detectedServer))
+            {
+                // Different executable names can identify CN/global without
+                // config.ini. Same-name clients and CN/Bilibili cannot be
+                // safely assigned to a target server from the exe alone.
+                if (!string.Equals(profile.CnExeName, profile.GlobalExeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (globalExe && !cnExe) detectedServer = "global";
+                    else if (cnExe && !globalExe && preferredServer != "bilibili") detectedServer = "cn";
+                }
+
+                if (string.IsNullOrWhiteSpace(detectedServer))
+                {
+                    if (!allowDifferentServer) return null;
+                    detectedServer = "unknown";
+                }
+            }
             if (!allowDifferentServer && !string.Equals(detectedServer, preferredServer, StringComparison.OrdinalIgnoreCase))
                 return null;
 
-            string exe = detectedServer is "cn" or "bilibili" ? profile.CnExeName : profile.GlobalExeName;
-            if (!File.Exists(Path.Combine(path, exe)))
+            string exe = detectedServer switch
             {
-                if (!File.Exists(Path.Combine(path, profile.CnExeName)) &&
-                    !File.Exists(Path.Combine(path, profile.GlobalExeName)))
-                    return null;
-            }
+                "cn" or "bilibili" => profile.CnExeName,
+                "global" => profile.GlobalExeName,
+                _ => string.Empty,
+            };
+            if (!string.IsNullOrEmpty(exe) && !File.Exists(Path.Combine(path, exe)))
+                return null;
 
             return new GameSearchResult(path, detectedServer);
         }
@@ -232,30 +284,50 @@ namespace GenShin_Launcher_Plus.Service
             try
             {
                 var configPath = Path.Combine(gamePath, "config.ini");
-                if (!File.Exists(configPath)) return null;
-
-                foreach (var rawLine in File.ReadLines(configPath))
+                if (File.Exists(configPath))
                 {
-                    var line = rawLine.Trim();
-                    if (line.StartsWith("#") || line.StartsWith(";")) continue;
-                    var index = line.IndexOf('=');
-                    if (index <= 0) continue;
-                    var key = line[..index].Trim();
-                    if (!key.Equals("cps", StringComparison.OrdinalIgnoreCase)) continue;
-                    var value = line[(index + 1)..].Trim().Trim('"');
+                    foreach (var rawLine in File.ReadLines(configPath))
+                    {
+                        var line = rawLine.Trim();
+                        if (line.StartsWith("#") || line.StartsWith(";")) continue;
+                        var index = line.IndexOf('=');
+                        if (index <= 0) continue;
+                        var key = line[..index].Trim();
+                        var value = line[(index + 1)..].Trim().Trim('"');
 
-                    if (value.Contains("bilibili", StringComparison.OrdinalIgnoreCase))
-                        return "bilibili";
-                    if (value.Contains("hoyoverse", StringComparison.OrdinalIgnoreCase))
-                        return "global";
-                    if (value.Contains("mihoyo", StringComparison.OrdinalIgnoreCase))
-                        return "cn";
+                        if (key.Equals("cps", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (value.Contains("bilibili", StringComparison.OrdinalIgnoreCase)) return "bilibili";
+                            if (value.Contains("hoyoverse", StringComparison.OrdinalIgnoreCase)) return "global";
+                            if (value.Contains("mihoyo", StringComparison.OrdinalIgnoreCase)) return "cn";
+                        }
+                        else if (key.Equals("game_biz", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (value.EndsWith("_bilibili", StringComparison.OrdinalIgnoreCase)) return "bilibili";
+                            if (value.EndsWith("_global", StringComparison.OrdinalIgnoreCase)) return "global";
+                            if (value.EndsWith("_cn", StringComparison.OrdinalIgnoreCase)) return "cn";
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 GenShin_Launcher_Plus.Helper.Logger.Warn($"Detect server from config failed: {ex.Message}", "Search");
             }
+
+            // The launcher creates explicit sibling names such as
+            // "Star Rail (global)". Preserve that useful hint if config.ini
+            // is absent or incomplete.
+            try
+            {
+                string directoryName = new DirectoryInfo(gamePath).Name;
+                foreach (var server in new[] { "cn", "global", "bilibili" })
+                {
+                    if (directoryName.EndsWith($"({server})", StringComparison.OrdinalIgnoreCase))
+                        return server;
+                }
+            }
+            catch { }
             return null;
         }
     }

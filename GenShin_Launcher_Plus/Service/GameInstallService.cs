@@ -82,6 +82,9 @@ public class GameInstallService : INotifyPropertyChanged
     private string _bytesProgressText = "";
     public string BytesProgressText { get => _bytesProgressText; set { _bytesProgressText = value; OnPropertyChanged(); } }
 
+    private string _remainingTimeText = "";
+    public string RemainingTimeText { get => _remainingTimeText; set { _remainingTimeText = value; OnPropertyChanged(); } }
+
     private long _totalBytes;
     public long TotalBytes { get => _totalBytes; set { _totalBytes = value; OnPropertyChanged(); } }
 
@@ -146,6 +149,7 @@ public class GameInstallService : INotifyPropertyChanged
     private CancellationTokenSource? _cts;
     private long _speedBytesAccumulator;
     private long _lastSpeedTickMs;
+    private double _smoothedBytesPerSecond;
     private Timer? _speedTimer;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -153,7 +157,13 @@ public class GameInstallService : INotifyPropertyChanged
 
     private void StartSpeedTracking()
     {
-        _speedBytesAccumulator = 0; _lastSpeedTickMs = Environment.TickCount64;
+        _speedBytesAccumulator = 0;
+        _smoothedBytesPerSecond = 0;
+        _lastSpeedTickMs = Environment.TickCount64;
+        ProgressPercent = 0;
+        DownloadSpeedText = "0 KB/s";
+        BytesProgressText = $"{FormatBytes(Volatile.Read(ref _downloadedBytes))} / {FormatBytes(Volatile.Read(ref _totalBytes))}";
+        RemainingTimeText = "--:--:--";
         _speedTimer?.Dispose();
         _speedTimer = new Timer(_ =>
         {
@@ -163,8 +173,13 @@ public class GameInstallService : INotifyPropertyChanged
                 if (elapsed > 0)
                 {
                     var speed = Interlocked.Exchange(ref _speedBytesAccumulator, 0) * 1000 / elapsed;
-                    DownloadSpeedText = FormatSpeed(speed);
-                    BytesProgressText = $"{FormatBytes(Volatile.Read(ref _downloadedBytes))} / {FormatBytes(Volatile.Read(ref _totalBytes))}";
+                    if (speed > 0)
+                        _smoothedBytesPerSecond = _smoothedBytesPerSecond <= 0 ? speed : _smoothedBytesPerSecond * 0.7 + speed * 0.3;
+                    var downloaded = Volatile.Read(ref _downloadedBytes);
+                    var total = Volatile.Read(ref _totalBytes);
+                    DownloadSpeedText = speed > 0 ? FormatSpeed(speed) : "0 KB/s";
+                    BytesProgressText = $"{FormatBytes(downloaded)} / {FormatBytes(total)}";
+                    RemainingTimeText = FormatRemainingTime(total - downloaded, _smoothedBytesPerSecond);
                     _lastSpeedTickMs = now;
                 }
             }
@@ -172,8 +187,22 @@ public class GameInstallService : INotifyPropertyChanged
         }, null, 1000, 1000);
     }
 
-    private void StopSpeedTracking() { _speedTimer?.Dispose(); _speedTimer = null; DownloadSpeedText = ""; BytesProgressText = ""; }
-    private void ReportBytes(long n) { Interlocked.Add(ref _downloadedBytes, n); Interlocked.Add(ref _speedBytesAccumulator, n); }
+    private void StopSpeedTracking()
+    {
+        _speedTimer?.Dispose();
+        _speedTimer = null;
+        DownloadSpeedText = "- KB/s";
+        RemainingTimeText = "--:--:--";
+    }
+
+    private void ReportBytes(long n)
+    {
+        var downloaded = Interlocked.Add(ref _downloadedBytes, n);
+        Interlocked.Add(ref _speedBytesAccumulator, n);
+        var total = Volatile.Read(ref _totalBytes);
+        if (total > 0)
+            ProgressPercent = Math.Min(100, (double)downloaded / total * 100);
+    }
 
     private void BeginOperation(GameInstallOperation operation, string gameBiz, string installPath)
     {
@@ -194,18 +223,72 @@ public class GameInstallService : INotifyPropertyChanged
         foreach (var profile in GameProfiles.All)
             foreach (var server in new[] { "cn", "global", "bilibili" })
             {
-                // A GameBiz owns its own install directory.  Using the legacy
-                // game-level fallback here makes an uninstalled target server
-                // look like it already has an install path and can lead to a
-                // destructive in-place server conversion.
-                var p = data.GetExactGamePath($"{profile.Id}_{server}");
-                if (!string.IsNullOrEmpty(p) && Directory.Exists(p))
+                foreach (var path in GetKnownGamePathCandidates(data, profile, server))
                 {
-                    var r = Path.GetPathRoot(p);
-                    if (!string.IsNullOrEmpty(r)) drives.Add(r);
+                    if (!IsUsableGameDirectory(profile, path)) continue;
+                    var root = Path.GetPathRoot(path);
+                    if (!string.IsNullOrEmpty(root)) drives.Add(root);
                 }
             }
         return drives.ToList();
+    }
+
+    internal static IEnumerable<string> GetKnownGamePathCandidates(DataModel data, GameProfile profile, string server)
+    {
+        var gameBiz = $"{profile.Id}_{server}";
+        return GetKnownGamePathCandidates(profile, server, new string?[]
+        {
+            data.GetExactGamePath(gameBiz),
+            data.GetGamePath(gameBiz),
+        });
+    }
+
+    internal static IReadOnlyList<string> GetKnownGamePathCandidates(
+        GameProfile profile,
+        string server,
+        IEnumerable<string?> configuredPaths)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var results = new List<string>();
+        var candidates = configuredPaths.ToList();
+        try
+        {
+            candidates.AddRange(GameSearchService.FindGames(profile, server, allowDifferentServer: true)
+                .Select(x => x.Path));
+        }
+        catch { }
+
+        // Multi-server hard-link installs are normally sibling directories.
+        // Search only known parents so custom layouts are rediscovered without
+        // an expensive or intrusive whole-drive scan.
+        foreach (var seed in candidates.Where(x => !string.IsNullOrWhiteSpace(x)).ToList())
+        {
+            try
+            {
+                var parent = Directory.GetParent(Path.GetFullPath(seed!));
+                if (parent?.Exists == true)
+                    candidates.AddRange(parent.EnumerateDirectories().Select(x => x.FullName));
+            }
+            catch { }
+        }
+
+        foreach (var path in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            string normalized;
+            try { normalized = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+            catch { continue; }
+            if (seen.Add(normalized) && IsUsableGameDirectory(profile, normalized))
+                results.Add(normalized);
+        }
+        return results;
+    }
+
+    internal static bool IsUsableGameDirectory(GameProfile profile, string path)
+    {
+        if (!Directory.Exists(path)) return false;
+        return File.Exists(Path.Combine(path, profile.CnExeName))
+            || File.Exists(Path.Combine(path, profile.GlobalExeName));
     }
 
     public static string GetDefaultInstallDir(DataModel data, string gameBiz)
@@ -400,8 +483,7 @@ public class GameInstallService : INotifyPropertyChanged
                 var httpClient = _httpClients[Environment.CurrentManagedThreadId % _httpClients.Length];
                 await DownloadChunksToFileAsync(httpClient, file, ct2);
                 file.IsFinished = true;
-                var done = Interlocked.Increment(ref dlDone);
-                ProgressPercent = (double)done / toDownload.Count * 100;
+                Interlocked.Increment(ref dlDone);
             });
 
             if (token.IsCancellationRequested) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); return; }
@@ -477,8 +559,7 @@ public class GameInstallService : INotifyPropertyChanged
                 var httpClient = _httpClients[Environment.CurrentManagedThreadId % _httpClients.Length];
                 await DownloadChunksToFileAsync(httpClient, file, ct2);
                 file.IsFinished = true;
-                var done = Interlocked.Increment(ref dlDone);
-                ProgressPercent = (double)done / toDownload.Count * 100;
+                Interlocked.Increment(ref dlDone);
             });
 
             if (token.IsCancellationRequested) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); return; }
@@ -541,8 +622,7 @@ public class GameInstallService : INotifyPropertyChanged
             {
                 var httpClient = _httpClients[Environment.CurrentManagedThreadId % _httpClients.Length];
                 await DownloadChunkCacheAsync(httpClient, file.Chunk, file.CachePath, ct2);
-                var done = Interlocked.Increment(ref dlDone);
-                ProgressPercent = (double)done / toDownload.Count * 100;
+                Interlocked.Increment(ref dlDone);
             });
 
             if (token.IsCancellationRequested) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); return; }
@@ -664,8 +744,7 @@ public class GameInstallService : INotifyPropertyChanged
                 var httpClient = _httpClients[Environment.CurrentManagedThreadId % _httpClients.Length];
                 await DownloadChunksToFileAsync(httpClient, file, ct2);
                 file.IsFinished = true;
-                var done = Interlocked.Increment(ref dlDone);
-                ProgressPercent = (double)done / toDownload.Count * 100;
+                Interlocked.Increment(ref dlDone);
             });
 
             if (token.IsCancellationRequested) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); return; }
@@ -904,9 +983,10 @@ public class GameInstallService : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Try to hard-link a file from another game installation by matching path + size.
-    /// Size check is sufficient - for the same game version, same relative path + same size
-    /// means the file content is identical. No need for expensive MD5 computation.
+    /// Try to hard-link files from another game installation. Every candidate
+    /// that has a manifest checksum is verified before it is linked; equal
+    /// version strings and file sizes are not proof of identical cross-server
+    /// content.
     /// </summary>
     private async Task<int> HardLinkFilesAsync(ChunkDownloadPlan plan, string hardLinkSourcePath, CancellationToken ct)
     {
@@ -918,13 +998,10 @@ public class GameInstallService : INotifyPropertyChanged
         if (toLink.Count == 0)
             return 0;
 
-        var sourceVersion = GameStateService.GetLocalVersion(hardLinkSourcePath)?.ToString();
-        var trustSizeOnly = !string.IsNullOrWhiteSpace(sourceVersion)
-            && string.Equals(sourceVersion, plan.Version, StringComparison.OrdinalIgnoreCase);
         int linked = 0, done = 0, total = toLink.Count;
         int degree = Math.Clamp(Environment.ProcessorCount, 4, _maxParallelism);
 
-        Logger.Info($"Hard link prepared: candidates={total}, sourceVersion={sourceVersion}, targetVersion={plan.Version}, trustSizeOnly={trustSizeOnly}", "Install");
+        Logger.Info($"Hard link prepared: candidates={total}, targetVersion={plan.Version}, checksumVerification=true", "Install");
         StatusText = $"正在创建硬链接 ({total})...";
 
         await Task.Run(() =>
@@ -932,8 +1009,7 @@ public class GameInstallService : INotifyPropertyChanged
             Parallel.ForEach(toLink, new ParallelOptions { MaxDegreeOfParallelism = degree, CancellationToken = ct }, file =>
             {
                 ct.ThrowIfCancellationRequested();
-                bool verifyMD5 = !trustSizeOnly || NeedsMD5Verification(file.RelativePath);
-                if (TryHardLinkPrepared(file, verifyMD5))
+                if (TryHardLinkPrepared(file))
                     Interlocked.Increment(ref linked);
 
                 var current = Interlocked.Increment(ref done);
@@ -1006,12 +1082,12 @@ public class GameInstallService : INotifyPropertyChanged
         return relativePath;
     }
 
-    private bool TryHardLinkPrepared(ChunkDownloadFile file, bool verifyMD5)
+    private bool TryHardLinkPrepared(ChunkDownloadFile file)
     {
         if (file.IsFinished || string.IsNullOrWhiteSpace(file.HardLinkTarget))
             return false;
 
-        return TryHardLinkMatchSize(file, file.HardLinkTarget, verifyMD5);
+        return TryHardLinkMatchSize(file, file.HardLinkTarget, verifyMD5: true);
     }
 
     private bool TryHardLinkBySize(ChunkDownloadFile file, string hardLinkSourcePath)
@@ -1580,18 +1656,28 @@ public class GameInstallService : INotifyPropertyChanged
             foreach (var s in new[] { "cn", "global", "bilibili" })
             {
                 var other = $"{game}_{s}"; if (other == gameBiz) continue;
-                var p = _session.Data.GetExactGamePath(other);
-                if (string.IsNullOrEmpty(p) || !Directory.Exists(p))
-                    p = GameSearchService.FindGame(profile, s)?.Path;
-                if (string.IsNullOrEmpty(p) || !Directory.Exists(p) || Path.GetPathRoot(p) != root) continue;
-                if (Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                    .Equals(Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)) continue;
-                var detectedServer = GameSearchService.DetectServerFromConfig(p);
-                if (!string.IsNullOrEmpty(detectedServer) && !string.Equals(detectedServer, s, StringComparison.OrdinalIgnoreCase)) continue;
-                var exe = profile.GetExeName(new GameBiz(other));
-                if (!File.Exists(Path.Combine(p, exe))) continue;
-                var v = GameStateService.GetLocalVersion(p);
-                if (v != null && (best == null || v > best)) { best = v; bestPath = p; }
+                foreach (var p in GetKnownGamePathCandidates(_session.Data, profile, s))
+                {
+                    if (!IsUsableGameDirectory(profile, p) ||
+                        !string.Equals(Path.GetPathRoot(p), root, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                        .Equals(Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var detectedServer = GameSearchService.DetectServerFromConfig(p);
+                    if (!string.IsNullOrEmpty(detectedServer) && !string.Equals(detectedServer, s, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var v = GameStateService.GetLocalVersion(p);
+                    // A valid client without game_version is still a useful
+                    // hard-link source. Prefer a known/newer version when one
+                    // is available, matching Starward's candidate selection.
+                    if (bestPath == null || v != null && (best == null || v > best))
+                    {
+                        best = v;
+                        bestPath = p;
+                    }
+                }
             }
             if (bestPath != null) Logger.Info($"Hard link source: {bestPath}", "Install");
             else Logger.Info($"Hard link source not found for {gameBiz}", "Install");
@@ -1713,16 +1799,20 @@ public class GameInstallService : INotifyPropertyChanged
 
             // Hard-link from other server versions
             var game = new GameBiz(gameBiz).Game;
+            var profile = GameProfiles.FindById(game);
+            if (profile == null) { State = GameInstallState.Error; ErrorText = "未知游戏"; return; }
             var root = Path.GetPathRoot(installPath);
+            var normalizedInstallPath = Path.GetFullPath(installPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var siblingInstallPaths = new[] { "cn", "global", "bilibili" }
+                .SelectMany(server => GetKnownGamePathCandidates(_session.Data, profile, server))
+                .Where(path => string.Equals(Path.GetPathRoot(path), root, StringComparison.OrdinalIgnoreCase))
+                .Where(path => !string.Equals(path, normalizedInstallPath, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             int hardLinked = 0;
-            foreach (var server in new[] { "cn", "global", "bilibili" })
+            foreach (var otherPath in siblingInstallPaths)
             {
-                var otherBiz = $"{game}_{server}";
-                if (otherBiz == gameBiz) continue;
-                var otherPath = _session.Data.GetExactGamePath(otherBiz);
-                if (string.IsNullOrEmpty(otherPath) || !Directory.Exists(otherPath)) continue;
-                if (Path.GetPathRoot(otherPath) != root) continue;
-
                 foreach (var file in audioFiles.Where(f => !f.IsFinished))
                 {
                     if (TryHardLinkBySize(file, otherPath))
@@ -1749,28 +1839,10 @@ public class GameInstallService : INotifyPropertyChanged
                 var httpClient = _httpClients[Environment.CurrentManagedThreadId % _httpClients.Length];
                 await DownloadChunksToFileAsync(httpClient, file, ct2);
                 file.IsFinished = true;
-                var done = Interlocked.Increment(ref dlDone);
-                ProgressPercent = (double)done / toDownload.Count * 100;
+                Interlocked.Increment(ref dlDone);
             });
 
             if (token.IsCancellationRequested) { State = GameInstallState.Paused; StatusText = "已暂停"; StopSpeedTracking(); return; }
-
-            // Hard-link downloaded files to other servers
-            foreach (var server in new[] { "cn", "global", "bilibili" })
-            {
-                var otherBiz = $"{game}_{server}";
-                if (otherBiz == gameBiz) continue;
-                var otherPath = _session.Data.GetExactGamePath(otherBiz);
-                if (string.IsNullOrEmpty(otherPath) || !Directory.Exists(otherPath)) continue;
-                if (Path.GetPathRoot(otherPath) != root) continue;
-                foreach (var file in toDownload)
-                {
-                    var target = ResolveSafeChildPath(otherPath, file.RelativePath);
-                    if (target == null) continue;
-                    TryCreateHardLink(target, file.FullPath);
-                }
-                Logger.Info($"Hard-linked {audioField} to {otherBiz}", "Install");
-            }
 
             StopSpeedTracking();
             State = GameInstallState.Finished; StatusText = $"{audioField} 音频包安装完成"; ProgressPercent = 100;
@@ -1935,6 +2007,16 @@ public class GameInstallService : INotifyPropertyChanged
 
     private static string FormatSpeed(long bps) { const double KB = 1024, MB = 1024 * 1024; return bps >= MB ? $"{bps / MB:F1} MB/s" : bps >= KB ? $"{bps / KB:F1} KB/s" : $"{bps} B/s"; }
     private static string FormatBytes(long b) { const double KB = 1024, MB = 1024 * 1024, GB = 1024.0 * 1024 * 1024; return b >= GB ? $"{b / GB:F2} GB" : b >= MB ? $"{b / MB:F1} MB" : b >= KB ? $"{b / KB:F1} KB" : $"{b} B"; }
+    private static string FormatRemainingTime(long remainingBytes, double bytesPerSecond)
+    {
+        if (remainingBytes <= 0) return "00:00:00";
+        if (bytesPerSecond <= 0) return "--:--:--";
+        var seconds = Math.Min(remainingBytes / bytesPerSecond, TimeSpan.MaxValue.TotalSeconds);
+        var remaining = TimeSpan.FromSeconds(seconds);
+        return remaining.TotalDays >= 1
+            ? $"{(int)remaining.TotalDays}.{remaining:hh\\:mm\\:ss}"
+            : remaining.ToString(@"hh\:mm\:ss");
+    }
 }
 
 public class AudioPackInfo

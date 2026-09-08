@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using GenShin_Launcher_Plus.Core;
 using GenShin_Launcher_Plus.Helper;
 using GenShin_Launcher_Plus.Models;
@@ -32,18 +33,29 @@ public sealed class GameServerSwitchService
         if (profile == null || !profile.GetSupportedServers().Contains(target))
             return ServerSwitchResult.Invalid("当前游戏不支持此服务器。");
 
-        if (string.Equals(current.Value, target.Value, StringComparison.OrdinalIgnoreCase))
-            return ServerSwitchResult.Current(target.Value, _session.Data.GetExactGamePath(target.Value));
-
         var exactPath = _session.Data.GetExactGamePath(target.Value);
-        if (!IsTargetClient(profile, target, exactPath) || IsPathSharedByAnotherServer(target, exactPath))
+        bool isCurrent = string.Equals(current.Value, target.Value, StringComparison.OrdinalIgnoreCase);
+        if (IsTargetClient(profile, target, exactPath, trustExplicitPath: true))
+        {
+            // Older launcher versions could map one legacy path to every
+            // server. The user's explicit target selection is authoritative
+            // when the directory has no contradictory channel metadata.
+            ClearDuplicateMappings(target, exactPath!);
+            return isCurrent
+                ? ServerSwitchResult.Current(target.Value, exactPath)
+                : CompleteInstalledSwitch(current, target, exactPath!);
+        }
+
+        if (!IsTargetClient(profile, target, exactPath, trustExplicitPath: true) ||
+            IsPathSharedByAnotherServer(target, exactPath))
         {
             // Discover an existing target client before presenting installation.
             // Never fall back to the previous server's legacy game-level path.
-            var discovered = GameSearchService.FindGame(profile, target.Server);
-            if (discovered != null && IsTargetClient(profile, target, discovered.Path) && !IsPathSharedByAnotherServer(target, discovered.Path))
+            var discoveredPath = GameInstallService.GetKnownGamePathCandidates(_session.Data, profile, target.Server)
+                .FirstOrDefault(path => IsTargetClient(profile, target, path, trustExplicitPath: false) && !IsPathSharedByAnotherServer(target, path));
+            if (!string.IsNullOrWhiteSpace(discoveredPath))
             {
-                exactPath = discovered.Path;
+                exactPath = discoveredPath;
                 _session.Data.SetGamePath(target.Value, exactPath);
                 Logger.Info($"Discovered {target.Value} client: {exactPath}", "ServerSwitch");
             }
@@ -71,14 +83,30 @@ public sealed class GameServerSwitchService
         return ServerSwitchResult.InstallRequired(target.Value, recommendedPath, source);
     }
 
-    private bool IsTargetClient(GameProfile profile, GameBiz target, string? path)
+    private ServerSwitchResult CompleteInstalledSwitch(GameBiz current, GameBiz target, string exactPath)
+    {
+        _session.Data.ActiveGameBiz = target.Value;
+        Logger.Info($"Server switched: {current} -> {target} ({exactPath})", "ServerSwitch");
+        return ServerSwitchResult.Installed(target.Value, exactPath);
+    }
+
+    private bool IsTargetClient(
+        GameProfile profile,
+        GameBiz target,
+        string? path,
+        bool trustExplicitPath)
     {
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
             return false;
+        return GameStateService.IsGameInstalled(path, profile, target, trustExplicitPath);
+    }
 
+    private static bool IsReusableSource(GameProfile profile, GameBiz expectedSource, string path)
+    {
+        if (!GameInstallService.IsUsableGameDirectory(profile, path)) return false;
         var detected = GameSearchService.DetectServerFromConfig(path);
-        return (string.IsNullOrWhiteSpace(detected) || string.Equals(detected, target.Server, StringComparison.OrdinalIgnoreCase))
-            && File.Exists(Path.Combine(path, profile.GetExeName(target)));
+        return string.IsNullOrWhiteSpace(detected) ||
+            string.Equals(detected, expectedSource.Server, StringComparison.OrdinalIgnoreCase);
     }
 
     private bool IsPathSharedByAnotherServer(GameBiz target, string? path)
@@ -109,6 +137,36 @@ public sealed class GameServerSwitchService
         return false;
     }
 
+    private void ClearDuplicateMappings(GameBiz target, string path)
+    {
+        var profile = GameProfiles.FindById(target.Game);
+        if (profile == null) return;
+
+        foreach (var other in profile.GetSupportedServers())
+        {
+            if (other == target) continue;
+            var otherPath = _session.Data.GetExactGamePath(other.Value);
+            if (!PathsEqual(path, otherPath)) continue;
+
+            _session.Data.SetGamePath(other.Value, string.Empty);
+            Logger.Info($"Removed duplicate legacy path mapping for {other}: {otherPath}", "ServerSwitch");
+        }
+    }
+
+    private static bool PathsEqual(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            return false;
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return string.Equals(left, right, StringComparison.OrdinalIgnoreCase); }
+    }
+
     private string? FindBestHardLinkSource(GameBiz target)
     {
         var profile = GameProfiles.FindById(target.Game);
@@ -119,16 +177,16 @@ public sealed class GameServerSwitchService
         foreach (var source in profile.GetSupportedServers())
         {
             if (source == target) continue;
-            var path = _session.Data.GetExactGamePath(source.Value);
-            if (!IsTargetClient(profile, source, path))
-                path = GameSearchService.FindGame(profile, source.Server)?.Path;
-            if (!IsTargetClient(profile, source, path)) continue;
-
-            var version = GameStateService.GetLocalVersion(path!);
-            if (bestPath == null || version != null && (bestVersion == null || version > bestVersion))
+            foreach (var path in GameInstallService.GetKnownGamePathCandidates(_session.Data, profile, source.Server))
             {
-                bestPath = path;
-                bestVersion = version;
+                if (!IsReusableSource(profile, source, path)) continue;
+
+                var version = GameStateService.GetLocalVersion(path);
+                if (bestPath == null || version != null && (bestVersion == null || version > bestVersion))
+                {
+                    bestPath = path;
+                    bestVersion = version;
+                }
             }
         }
 
